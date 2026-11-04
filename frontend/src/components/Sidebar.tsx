@@ -5,10 +5,10 @@ import WaypointInputs from "./WaypointInputs";
 // ── Placeholder names – you can rename these later ──────────────────────────
 const DROPDOWN_TITLES = [
   "Közlekedési eszköz",
-  "2. Menetrend típusa",
-  "3. Időszak",
-  "4. Járat kategória",
-  "5. Egyéb szűrők",
+  "Átszálások száma",
+  "Átszállásra szánt idő",
+  "Induálsi időpont",
+  "Egyéb",
 ];
 
 const CHECKBOX_OPTIONS: CheckboxOption[] = [
@@ -61,7 +61,7 @@ function Sidebar({ onSearch }: SidebarProps) {
 
       {/* ── Search button ─────────────────────────────────────────────── */}
       <button className="search-btn" onClick={handleSearch}>
-        🔍 Keresés
+         Keresés
       </button>
     </aside>
   );
