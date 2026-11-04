@@ -320,3 +320,113 @@ body {
   background: #cbd5e0;
   border-radius: 4px;
 }
+
+
+/* ===== Results List ===== */
+.results-list {
+  width: 100%;
+  max-width: 620px;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.results-title {
+  font-size: 1.1rem;
+  color: #cbd5e1;
+  margin-bottom: 0.5rem;
+}
+
+.result-card {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  padding: 1.25rem 1.5rem;
+  transition: background 0.2s, transform 0.15s;
+}
+
+.result-card:hover {
+  background: rgba(255, 255, 255, 0.11);
+  transform: translateY(-2px);
+}
+
+.result-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.4rem;
+}
+
+.result-icon {
+  font-size: 1.4rem;
+}
+
+.result-route-name {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.result-mode-badge {
+  margin-left: auto;
+  background: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+}
+
+.result-long-name {
+  font-size: 0.85rem;
+  color: #94a3b8;
+  margin-bottom: 0.85rem;
+}
+
+.result-times {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.6rem;
+}
+
+.result-stop {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.result-stop .time {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #f1f5f9;
+  font-variant-numeric: tabular-nums;
+}
+
+.result-stop .station {
+  font-size: 0.82rem;
+  color: #94a3b8;
+}
+
+.result-arrow {
+  font-size: 1.3rem;
+  color: #3b82f6;
+  flex-shrink: 0;
+}
+
+.result-operator {
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+/* ===== Error card ===== */
+.error-card {
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+}
+
+/* ===== Main content flex alignment (top instead of center when results) ===== */
+.main-content {
+  align-items: flex-start;
+}
