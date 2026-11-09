@@ -45,12 +45,7 @@ function App() {
   const [searched, setSearched] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
 
-  const handleSearch = async (params: {
-    origin: string;
-    destination: string;
-    waypoints: string[];
-    transport_modes: string[];
-  }) => {
+  const handleSearch = async (params: SearchParams) => {
     if (!params.origin.trim() || !params.destination.trim()) {
       setError("Kérem adja meg az indulási pontot és a célt!");
       return;
