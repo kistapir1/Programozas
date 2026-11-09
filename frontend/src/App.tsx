@@ -1,5 +1,7 @@
 import { useState } from "react";
 import Sidebar from "./components/Sidebar";
+import Navbar from "./components/Navbar";
+import AuthPanel from "./components/AuthPanel";
 import "./index.css";
 
 // Az API végpont base URL-je
@@ -18,6 +20,17 @@ interface ScheduleResult {
   arrival_time: string;
 }
 
+interface SearchParams {
+  origin: string;
+  destination: string;
+  waypoints: string[];
+  transport_modes: string[];
+  max_transfers: number;
+  time_mode: "departure" | "arrival";
+  date: string;
+  time: string;
+}
+
 // Transport mode → Magyar szöveg + ikon
 const MODE_LABELS: Record<string, { label: string; icon: string }> = {
   train:         { label: "Vonat",          icon: "🚆" },
@@ -30,6 +43,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
+  const [showAuth, setShowAuth] = useState(false);
 
   const handleSearch = async (params: {
     origin: string;
@@ -69,75 +83,85 @@ function App() {
   };
 
   return (
-    <div className="app-shell">
-      {/* ── Bal oldal: keresőpanel ──────────────────────────────────────── */}
-      <Sidebar onSearch={handleSearch} />
+    <>
+      <Navbar onAuthClick={() => setShowAuth(true)} />
 
-      {/* ── Jobb oldal: találatok ──────────────────────────────────────── */}
-      <main className="main-content">
-        {!searched && (
-          <div className="placeholder-card">
-            <h2>Menetrend eredmények</h2>
-            <p>
-              Adja meg az indulási pontot és a célt a bal oldali panelen, majd
-              kattintson a <strong>Keresés</strong> gombra.
-            </p>
+        {showAuth ? (
+          <div className="app-shell">
+            <AuthPanel onBack={() => setShowAuth(false)} />
           </div>
-        )}
+        ):(
+      <div className="app-shell">
+        {/* ── Bal oldal: keresőpanel ──────────────────────────────────────── */}
+        <Sidebar onSearch={handleSearch} />
 
-        {loading && (
-          <div className="placeholder-card">
-            <p>⏳ Keresés folyamatban…</p>
-          </div>
-        )}
+        {/* ── Jobb oldal: találatok ──────────────────────────────────────── */}
+        <main className="main-content">
+          {!searched && (
+            <div className="placeholder-card">
+              <h2>Menetrend eredmények</h2>
+              <p>
+                Adja meg az indulási pontot és a célt a bal oldali panelen, majd
+                kattintson a <strong>Keresés</strong> gombra.
+              </p>
+            </div>
+          )}
 
-        {error && (
-          <div className="placeholder-card error-card">
-            <p>⚠️ {error}</p>
-          </div>
-        )}
+          {loading && (
+            <div className="placeholder-card">
+              <p>⏳ Keresés folyamatban…</p>
+            </div>
+          )}
 
-        {!loading && searched && !error && results.length === 0 && (
-          <div className="placeholder-card">
-            <h2>Nincs találat</h2>
-            <p>Nem található menetrend a megadott feltételekkel. Próbáljon más útvonalat!</p>
-          </div>
-        )}
+          {error && (
+            <div className="placeholder-card error-card">
+              <p>⚠️ {error}</p>
+            </div>
+          )}
 
-        {!loading && results.length > 0 && (
-          <div className="results-list">
-            <h2 className="results-title">
-              {results.length} találat (max. 5)
-            </h2>
-            {results.map((r, idx) => {
-              const mode = MODE_LABELS[r.transport_mode] ?? { label: r.transport_mode, icon: "🚏" };
-              return (
-                <div key={idx} className="result-card">
-                  <div className="result-header">
-                    <span className="result-icon">{mode.icon}</span>
-                    <span className="result-route-name">{r.route_short_name}</span>
-                    <span className="result-mode-badge">{mode.label}</span>
-                  </div>
-                  <p className="result-long-name">{r.route_long_name}</p>
-                  <div className="result-times">
-                    <div className="result-stop">
-                      <span className="time">{r.departure_time}</span>
-                      <span className="station">{r.origin_station}</span>
+          {!loading && searched && !error && results.length === 0 && (
+            <div className="placeholder-card">
+              <h2>Nincs találat</h2>
+              <p>Nem található menetrend a megadott feltételekkel. Próbáljon más útvonalat!</p>
+            </div>
+          )}
+
+          {!loading && results.length > 0 && (
+            <div className="results-list">
+              <h2 className="results-title">
+                {results.length} találat (max. 5)
+              </h2>
+              {results.map((r, idx) => {
+                const mode = MODE_LABELS[r.transport_mode] ?? { label: r.transport_mode, icon: "🚏" };
+                return (
+                  <div key={idx} className="result-card">
+                    <div className="result-header">
+                      <span className="result-icon">{mode.icon}</span>
+                      <span className="result-route-name">{r.route_short_name}</span>
+                      <span className="result-mode-badge">{mode.label}</span>
                     </div>
-                    <span className="result-arrow">→</span>
-                    <div className="result-stop">
-                      <span className="time">{r.arrival_time}</span>
-                      <span className="station">{r.destination_station}</span>
+                    <p className="result-long-name">{r.route_long_name}</p>
+                    <div className="result-times">
+                      <div className="result-stop">
+                        <span className="time">{r.departure_time}</span>
+                        <span className="station">{r.origin_station}</span>
+                      </div>
+                      <span className="result-arrow">→</span>
+                      <div className="result-stop">
+                        <span className="time">{r.arrival_time}</span>
+                        <span className="station">{r.destination_station}</span>
+                      </div>
                     </div>
+                    <p className="result-operator">🏢 {r.operator}</p>
                   </div>
-                  <p className="result-operator">🏢 {r.operator}</p>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </main>
-    </div>
+                );
+              })}
+            </div>
+          )}
+        </main>
+      </div>
+      )}
+    </>
   );
 }
 
