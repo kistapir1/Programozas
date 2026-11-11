@@ -3,14 +3,14 @@ import Dropdown from "./Dropdown";
 import CheckboxGroup, { type CheckboxOption } from "./CheckboxGroup";
 import WaypointInputs from "./WaypointInputs";
 
-// Közlekedési eszközök – a checkbox id-k megegyeznek a backend transport_mode értékeivel
+// Közlekedési eszközök – az id közvetlenül a route_types.type_name értéke az adatbázisban
 const TRANSPORT_OPTIONS: CheckboxOption[] = [
-  { id: "train",         label: "Vonat" },
-  { id: "intercity_bus", label: "Helyközi járat" },
-  { id: "local_bus",     label: "Helyi járat" },
-  { id: "metro",         label: "Metró" },
-  { id: "tram",          label: "Villamos" },
-  { id: "trolleybus",    label: "Trolibusz" },
+  { id: "Metró",                 label: "Metró" },
+  { id: "Villamos",              label: "Villamos" },
+  { id: "Busz",                  label: "Busz" },
+  { id: "Trolibusz",             label: "Trolibusz" },
+  { id: "Elővárosi vasút / HÉV", label: "HÉV" },
+  { id: "Komp",                  label: "Komp" },
 ];
 
 const OTHER_DROPDOWNS = ["Egyéb"];

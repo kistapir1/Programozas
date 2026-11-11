@@ -3,12 +3,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 
+from database import get_db_connection
 from db_trip_repository import DbTripRepository
 from schedule_search_service import ScheduleSearchService
 
 app = FastAPI(title="Menetrend Kereső API", version="1.0.0")
 
-# CORS engedélyezése az Electron / Vite frontend számára (pl. localhost:5173)
+# CORS engedélyezése az Electron / Vite frontend számára
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -22,41 +23,66 @@ class SearchRequest(BaseModel):
     origin: str
     destination: str
     waypoints: Optional[List[str]] = []
-    transport_modes: Optional[List[str]] = []  # pl. ['train', 'intercity_bus']
+    transport_modes: Optional[List[str]] = []
+    max_transfers: Optional[int] = 2
+    time_mode: Optional[str] = "departure"
+    date: Optional[str] = None
+    time: Optional[str] = None
 
-# 1. Végpont: Állomások listázása / keresése (Autocomplete-hez)
+
+@app.get("/")
+def read_root():
+    return {"message": "Menetrend Backend fut (BKK GTFS adatbázis aktív)!"}
+
+
+# 1. Végpont: Állomások listázása / autocomplete (ékezet-független unaccent kereséssel)
 @app.get("/api/stations")
 def search_stations(q: str = Query(..., min_length=1)):
     try:
-        from database import get_db_connection
         conn = get_db_connection()
         cur = conn.cursor()
-        #query = "SELECT station_code, name, city, station_type FROM stations WHERE name ILIKE %s OR city ILIKE %s LIMIT 10"
-        #nem teljesen ugyan az mivel nincs city mező a stops táblában
-        #de a stops_name tartalmazza a település nevét is
-        query = "SELECT s.stop_id, s.stop_name AS name, rt.type_name AS jarmu_tipus FROM stops s JOIN stop_times st ON s.stop_id = st.stop_id JOIN trips t ON st.trip_id = t.trip_id JOIN routes r ON t.route_id = r.route_id JOIN route_types rt ON r.route_type = rt.route_type"
-        like_term = f"%{q}%"
-        cur.execute(query, (like_term, like_term))
+        
+        # unaccent-tel keresünk, hogy ékezet nélkül gépelve is megtalálja (pl. 'deak' -> 'Deák Ferenc tér')
+        query = """
+            SELECT DISTINCT stop_name AS name
+            FROM stops
+            WHERE unaccent(stop_name) ILIKE unaccent(%s)
+            ORDER BY stop_name
+            LIMIT 10
+        """
+        like_term = f"%{q.strip()}%"
+        cur.execute(query, (like_term,))
         stations = cur.fetchall()
         cur.close()
         conn.close()
-        return stations
+        return [dict(s) for s in stations]
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
-# 2. Végpont: Menetrend keresés – a ScheduleSearchService-t használja
+
+# 2. Végpont: Menetrend keresés
 @app.post("/api/search")
 def search_schedule(search: SearchRequest):
     try:
+        print(f"\n[API KÉRÉS] origin='{search.origin}', dest='{search.destination}', time='{search.time}', time_mode='{search.time_mode}', modes={search.transport_modes}")
         repo = DbTripRepository()
         service = ScheduleSearchService(repo)
+        
+        # Ha departure módban van és van megadva időpont, figyelembe vesszük
+        time_filter = search.time if search.time_mode == "departure" and search.time else None
+        
         result = service.search(
             origin=search.origin,
             destination=search.destination,
             transport_modes=list(search.transport_modes or []),
+            departure_time_from=time_filter,
         )
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

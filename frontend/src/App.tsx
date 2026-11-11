@@ -31,11 +31,15 @@ interface SearchParams {
   time: string;
 }
 
-// Transport mode → Magyar szöveg + ikon
+// Transport mode → Magyar szöveg + ikon (közvetlenül az adatbázisbeli route_types.type_name szerint)
 const MODE_LABELS: Record<string, { label: string; icon: string }> = {
-  train:         { label: "Vonat",          icon: "🚆" },
-  intercity_bus: { label: "Helyközi busz",  icon: "🚌" },
-  local_bus:     { label: "Helyi busz",     icon: "🚍" },
+  "Metró":                 { label: "Metró",     icon: "🚇" },
+  "Villamos":              { label: "Villamos",  icon: "🚋" },
+  "Busz":                  { label: "Busz",      icon: "🚌" },
+  "Trolibusz":             { label: "Trolibusz", icon: "🚎" },
+  "Elővárosi vasút / HÉV": { label: "HÉV",       icon: "🚆" },
+  "Komp":                  { label: "Komp",      icon: "⛴️" },
+  "Vasút":                 { label: "Vasút",     icon: "🚆" },
 };
 
 function App() {
@@ -124,7 +128,7 @@ function App() {
           {!loading && results.length > 0 && (
             <div className="results-list">
               <h2 className="results-title">
-                {results.length} találat (max. 5)
+                {results.length} találat
               </h2>
               {results.map((r, idx) => {
                 const mode = MODE_LABELS[r.transport_mode] ?? { label: r.transport_mode, icon: "🚏" };

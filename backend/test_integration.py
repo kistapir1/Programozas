@@ -95,6 +95,7 @@ class StubTripRepository:
         origin: str,
         destination: str,
         transport_modes: list[str],
+        departure_time_from: str | None = None,
     ) -> list[dict]:
         """Beégetett adatokon keres, origin/destination részleges egyezéssel."""
         origin_lower = origin.lower()

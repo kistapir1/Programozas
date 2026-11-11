@@ -1,4 +1,5 @@
 import { useState } from "react";
+import StationAutocomplete from "./StationAutocomplete";
 
 interface WaypointInputsProps {
   originLabel?: string;
@@ -52,14 +53,12 @@ function WaypointInputs({
       {/* Origin */}
       <div className="input-row">
         <span className="input-label">{originLabel}</span>
-        <input
-          className="text-input"
-          type="text"
+        <StationAutocomplete
           placeholder={originLabel}
           value={origin}
-          onChange={(e) => {
-            setOrigin(e.target.value);
-            notify(e.target.value, waypoints, destination);
+          onChange={(newVal) => {
+            setOrigin(newVal);
+            notify(newVal, waypoints, destination);
           }}
         />
       </div>
@@ -78,12 +77,10 @@ function WaypointInputs({
               ✕
             </button>
           </div>
-          <input
-            className="text-input"
-            type="text"
+          <StationAutocomplete
             placeholder={`${waypointLabel} ${i + 1}`}
             value={wp}
-            onChange={(e) => updateWaypoint(i, e.target.value)}
+            onChange={(newVal) => updateWaypoint(i, newVal)}
           />
         </div>
       ))}
@@ -103,14 +100,12 @@ function WaypointInputs({
       {/* Destination — always last */}
       <div className="destination-section">
         <span className="input-label">{destinationLabel}</span>
-        <input
-          className="text-input"
-          type="text"
+        <StationAutocomplete
           placeholder={destinationLabel}
           value={destination}
-          onChange={(e) => {
-            setDestination(e.target.value);
-            notify(origin, waypoints, e.target.value);
+          onChange={(newVal) => {
+            setDestination(newVal);
+            notify(origin, waypoints, newVal);
           }}
         />
       </div>
