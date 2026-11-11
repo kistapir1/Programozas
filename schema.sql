@@ -8,13 +8,15 @@ DROP TABLE IF EXISTS route_category_lookup CASCADE;
 DROP TABLE IF EXISTS stops CASCADE;
 DROP TABLE IF EXISTS shapes CASCADE;
 DROP TABLE IF EXISTS calendar_dates CASCADE;
-DROP TABLE IF EXISTS calendar CASCADE;
 DROP TABLE IF EXISTS agency CASCADE;
 DROP TABLE IF EXISTS wheelchair_boardings CASCADE;
 DROP TABLE IF EXISTS wheelchair_accessibilities CASCADE;
 DROP TABLE IF EXISTS bikes_allowed_types CASCADE;
 DROP TABLE IF EXISTS location_types CASCADE;
 DROP TABLE IF EXISTS exception_types CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
+DROP TABLE IF EXISTS friendships CASCADE;
+DROP TABLE IF EXISTS favorite_routes CASCADE;
 
 -- =========================================================================
 -- SZÓTÁRTÁBLÁK (Lookup tables a kódok jelentéséhez)
@@ -212,3 +214,59 @@ CREATE INDEX idx_stop_times_stop ON stop_times(stop_id);
 CREATE INDEX idx_trips_route ON trips(route_id);
 CREATE INDEX idx_trips_service ON trips(service_id);
 CREATE INDEX idx_stops_coords ON stops(stop_lat, stop_lon);
+
+
+-- =========================================================================
+-- USERS TÁBLÁK
+-- =========================================================================
+
+
+-- 15. Felhasználók tábla (Bejelentkezéshez)
+CREATE TABLE users (
+    user_id SERIAL PRIMARY KEY,
+    username VARCHAR(50) UNIQUE NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL, -- Jelszóhash (pl. bcrypt)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+
+-- 16. Barát kapcsolatok tábla (Kétirányú vagy jellegű kapcsolat kezelése)
+CREATE TABLE friendships (
+    user_id INT NOT NULL,
+    friend_id INT NOT NULL,
+    status VARCHAR(20) DEFAULT 'pending', -- 'pending' (függőben), 'accepted' (elfogadva)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, friend_id),
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (friend_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    -- Megakadályozzuk, hogy valaki saját magát jelölje be barátként
+    CONSTRAINT no_self_friendship CHECK (user_id <> friend_id)
+);
+
+CREATE TABLE favorite_routes (
+    id SERIAL PRIMARY KEY,
+    user_id INT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    shared_by_user_id INT REFERENCES users(user_id) ON DELETE SET NULL,
+    
+    -- Keresési paraméterek a későbbi frissítéshez (refresh)
+    origin_stop_id VARCHAR(50) REFERENCES stops(stop_id),
+    destination_stop_id VARCHAR(50) REFERENCES stops(stop_id),
+    transport_modes JSONB,
+    max_transfers INT,
+    
+    -- Felhasználói címke / név az útvonalhoz (pl. "Haza munkából")
+    label VARCHAR(100),
+    
+    -- A teljes útvonal-eredmény JSON formátumban (azonnali betöltéshez és offline módhoz)
+    snapshot JSONB NOT NULL,
+    snapshot_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, 
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexek a gyorsabb lekérdezésekhez
+CREATE INDEX idx_users_username ON users(username);
+CREATE INDEX idx_friendships_user ON friendships(user_id);
+CREATE INDEX idx_friendships_friend ON friendships(friend_id);
+CREATE INDEX idx_favorite_routes_user ON favorite_routes(user_id);
