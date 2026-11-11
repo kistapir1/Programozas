@@ -17,6 +17,8 @@ DROP TABLE IF EXISTS exception_types CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
 DROP TABLE IF EXISTS friendships CASCADE;
 DROP TABLE IF EXISTS favorite_routes CASCADE;
+DROP TABLE IF EXISTS pathways CASCADE;
+DROP TABLE IF EXISTS pathway_modes CASCADE;
 
 -- =========================================================================
 -- SZÓTÁRTÁBLÁK (Lookup tables a kódok jelentéséhez)
@@ -98,7 +100,7 @@ INSERT INTO route_types (route_type, type_name, description) VALUES
 (100, 'Vasúti szolgáltatás', 'Railway Service'),
 (109, 'Elővárosi vasút / HÉV', 'Suburban Railway / Commuter Rail');
 
--- 7. ÚJ: route_sort_order kategória lookup tábla (csoportosításhoz/szűréshez)
+-- 7. route_sort_order kategória lookup tábla (csoportosításhoz/szűréshez)
 CREATE TABLE route_category_lookup (
     category_id SERIAL PRIMARY KEY,
     category_name VARCHAR(50) NOT NULL,
@@ -111,12 +113,26 @@ INSERT INTO route_category_lookup (category_name, min_order, max_order) VALUES
 ('Nappali autóbusz', 22, 329),
 ('Éjszakai autóbusz', 330, 999);
 
+-- 8. Állomáson belüli gyalogos útvonalak / átjárók típusai (pathway_mode)
+CREATE TABLE pathway_modes (
+    code INT PRIMARY KEY,
+    name VARCHAR(50) NOT NULL,
+    description TEXT
+);
+INSERT INTO pathway_modes (code, name, description) VALUES
+(1, 'Sétafolyosó / Gyalogút (Walkway)', 'Sima vízszintes vagy enyhén lejtős gyalogos folyosó.'),
+(2, 'Lépcső (Stairs)', 'Lépcsősor az állomási szintkülönbségek áthidalására.'),
+(3, 'Mozgójárda (Moving sidewalk)', 'Vízszintes mozgójárda / mozgóutca.'),
+(4, 'Mozgólépcső (Escalator)', 'Gépiesített mozgólépcső.'),
+(5, 'Lift (Elevator)', 'Kerekesszékkel is használható felvonó / lift.'),
+(6, 'Jegypénztár kapu (Fare gate)', 'Kihúzható/forgókapus beléptető kapu.'),
+(7, 'Kilépő kapu (Exit gate)', 'Kizárólag kifelé vezető kapu.');
 
 -- =========================================================================
 -- FŐ GTFS TÁBLÁK
 -- =========================================================================
 
--- 8. Agency (Szolgáltatók)
+-- 9. Agency (Szolgáltatók)
 CREATE TABLE agency (
     agency_id VARCHAR(50) PRIMARY KEY,
     agency_name VARCHAR(255) NOT NULL,
@@ -126,7 +142,7 @@ CREATE TABLE agency (
     agency_phone VARCHAR(50)
 );
 
--- 9. Routes (Járatok / Vonalak) - Kiegészítve route_sort_order-rel
+-- 10. Routes (Járatok / Vonalak) - Kiegészítve route_sort_order-rel
 CREATE TABLE routes (
     agency_id VARCHAR(50),
     route_id VARCHAR(50) PRIMARY KEY,
@@ -141,7 +157,7 @@ CREATE TABLE routes (
     FOREIGN KEY (route_type) REFERENCES route_types(route_type)
 );
 
--- 10. Calendar Dates (Kivételek a naptárból)
+-- 11. Calendar Dates (Kivételek a naptárból)
 CREATE TABLE calendar_dates (
     service_id VARCHAR(100),
     date DATE NOT NULL,
@@ -150,7 +166,7 @@ CREATE TABLE calendar_dates (
     FOREIGN KEY (exception_type) REFERENCES exception_types(code)
 );
 
--- 11. Shapes (Nyomvonal pontjai)
+-- 12. Shapes (Nyomvonal pontjai)
 CREATE TABLE shapes (
     shape_id VARCHAR(50),
     shape_pt_sequence INT NOT NULL,
@@ -160,7 +176,7 @@ CREATE TABLE shapes (
     PRIMARY KEY (shape_id, shape_pt_sequence)
 );
 
--- 12. Stops (Megállók)
+-- 13. Stops (Megállók)
 CREATE TABLE stops (
     stop_id VARCHAR(50) PRIMARY KEY,
     stop_name VARCHAR(255) NOT NULL,
@@ -177,7 +193,21 @@ CREATE TABLE stops (
 );
 
 
--- 13. Trips (Indítások / Menetek)
+-- 14. Pathways (Megállók / Állomások belüli útvonalak és folyosók)
+CREATE TABLE pathways (
+    pathway_id VARCHAR(50) PRIMARY KEY,
+    pathway_mode INT NOT NULL,
+    is_bidirectional SMALLINT NOT NULL DEFAULT 1, -- 1 = kétirányú, 0 = egyirányú
+    from_stop_id VARCHAR(50) NOT NULL,
+    to_stop_id VARCHAR(50) NOT NULL,
+    traversal_time INT NOT NULL,                 -- Bejárási idő másodpercben
+    FOREIGN KEY (pathway_mode) REFERENCES pathway_modes(code),
+    FOREIGN KEY (from_stop_id) REFERENCES stops(stop_id) ON DELETE CASCADE,
+    FOREIGN KEY (to_stop_id) REFERENCES stops(stop_id) ON DELETE CASCADE
+);
+
+
+-- 14. Trips (Indítások / Menetek)
 CREATE TABLE trips (
     route_id VARCHAR(50) NOT NULL,
     trip_id VARCHAR(100) PRIMARY KEY,
@@ -193,7 +223,7 @@ CREATE TABLE trips (
     FOREIGN KEY (bikes_allowed) REFERENCES bikes_allowed_types(code)
 );
 
--- 14. Stop Times (Megállási és érkezési idők)
+-- 15. Stop Times (Megállási és érkezési idők)
 CREATE TABLE stop_times (
     trip_id VARCHAR(100) NOT NULL,
     stop_id VARCHAR(50) NOT NULL,
@@ -214,6 +244,8 @@ CREATE INDEX idx_stop_times_stop ON stop_times(stop_id);
 CREATE INDEX idx_trips_route ON trips(route_id);
 CREATE INDEX idx_trips_service ON trips(service_id);
 CREATE INDEX idx_stops_coords ON stops(stop_lat, stop_lon);
+CREATE INDEX idx_pathways_from ON pathways(from_stop_id);
+CREATE INDEX idx_pathways_to ON pathways(to_stop_id);
 
 
 -- =========================================================================
@@ -221,7 +253,7 @@ CREATE INDEX idx_stops_coords ON stops(stop_lat, stop_lon);
 -- =========================================================================
 
 
--- 15. Felhasználók tábla (Bejelentkezéshez)
+-- 16. Felhasználók tábla (Bejelentkezéshez)
 CREATE TABLE users (
     user_id SERIAL PRIMARY KEY,
     username VARCHAR(50) UNIQUE NOT NULL,
@@ -232,7 +264,7 @@ CREATE TABLE users (
 
 
 
--- 16. Barát kapcsolatok tábla (Kétirányú vagy jellegű kapcsolat kezelése)
+-- 17. Barát kapcsolatok tábla (Kétirányú vagy jellegű kapcsolat kezelése)
 CREATE TABLE friendships (
     user_id INT NOT NULL,
     friend_id INT NOT NULL,
@@ -245,6 +277,7 @@ CREATE TABLE friendships (
     CONSTRAINT no_self_friendship CHECK (user_id <> friend_id)
 );
 
+-- 18. Kedvenc útvonalak tábla (Felhasználó által mentett útvonalak)
 CREATE TABLE favorite_routes (
     id SERIAL PRIMARY KEY,
     user_id INT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
