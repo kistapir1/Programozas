@@ -1,0 +1,789 @@
+diff --git a/backend/auth.py b/backend/auth.py
+new file mode 100644
+index 0000000..aa222a3
+--- /dev/null
++++ b/backend/auth.py
+@@ -0,0 +1,199 @@
++"""
++auth.py – Regisztráció, belépés és tokenes azonosítás végpontjai
++=================================================================
++
++Végpontok (prefix: /api/auth):
++  POST /register  – új felhasználó; siker esetén rögtön tokent is ad
++  POST /login     – belépés emaillel VAGY felhasználónévvel (identifier)
++  GET  /me        – a tokenhez tartozó felhasználó adatai (védett)
++
++A védett végpontok a get_current_user függőséget használják:
++    @app.get("/valami")
++    def valami(user: dict = Depends(get_current_user)): ...
++A frontendnek a tokent így kell küldenie:
++    Authorization: Bearer <access_token>
++"""
++
++import re
++from datetime import datetime
++from typing import Optional
++
++from fastapi import APIRouter, Depends, HTTPException, status
++from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
++from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
++
++from db_user_repository import DbUserRepository, UserAlreadyExistsError, UserRepository
++from security import (
++    ACCESS_TOKEN_EXPIRE_MINUTES,
++    InvalidTokenError,
++    create_access_token,
++    decode_access_token,
++    hash_password,
++    password_needs_rehash,
++    verify_dummy_password,
++    verify_password,
++)
++
++router = APIRouter(prefix="/api/auth", tags=["auth"])
++
++PASSWORD_MIN_LENGTH = 8
++# Felső korlát: egy több megabájtos "jelszó" hash-elése feleslegesen terhelné a szervert
++PASSWORD_MAX_LENGTH = 128
++# A @ tiltott a felhasználónévben, így belépéskor egyértelmű, hogy emailt vagy nevet kaptunk
++USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_.\-]{3,50}$")
++
++INVALID_CREDENTIALS = "Hibás felhasználónév/email vagy jelszó."
++
++
++# =============================================================================
++# KÉRÉS / VÁLASZ MODELLEK
++# =============================================================================
++
++class RegisterRequest(BaseModel):
++    # A frontend camelCase "passwordAgain" mezőt küld; snake_case-szel is elfogadjuk
++    model_config = ConfigDict(populate_by_name=True)
++
++    username: str
++    email: EmailStr
++    password: str = Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH)
++    password_again: str = Field(alias="passwordAgain", max_length=PASSWORD_MAX_LENGTH)
++
++    @field_validator("username")
++    @classmethod
++    def validate_username(cls, v: str) -> str:
++        v = v.strip()
++        if not USERNAME_PATTERN.fullmatch(v):
++            raise ValueError(
++                "A felhasználónév 3–50 karakter lehet, és csak betűt, számot, "
++                "pontot, kötőjelet és aláhúzást tartalmazhat."
++            )
++        return v
++
++    @field_validator("email")
++    @classmethod
++    def normalize_email(cls, v: str) -> str:
++        return v.strip().lower()
++
++    @model_validator(mode="after")
++    def passwords_match(self) -> "RegisterRequest":
++        if self.password != self.password_again:
++            raise ValueError("A két jelszó nem egyezik.")
++        return self
++
++
++class LoginRequest(BaseModel):
++    identifier: str = Field(min_length=1, max_length=255)  # email vagy felhasználónév
++    password: str = Field(min_length=1, max_length=PASSWORD_MAX_LENGTH)
++
++
++class UserOut(BaseModel):
++    user_id: int
++    username: str
++    email: str
++    created_at: Optional[datetime] = None
++
++
++class TokenResponse(BaseModel):
++    access_token: str
++    token_type: str = "bearer"
++    expires_in: int  # másodperc
++    user: UserOut
++
++
++# =============================================================================
++# FÜGGŐSÉGEK
++# =============================================================================
++
++def get_user_repository() -> UserRepository:
++    """Tesztekben app.dependency_overrides-szal stubra cserélhető."""
++    return DbUserRepository()
++
++
++_bearer_scheme = HTTPBearer(auto_error=False)
++
++
++def get_current_user(
++    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
++    repo: UserRepository = Depends(get_user_repository),
++) -> dict:
++    """A kérés Bearer tokenje alapján visszaadja a bejelentkezett felhasználót, különben 401."""
++    unauthorized = HTTPException(
++        status_code=status.HTTP_401_UNAUTHORIZED,
++        detail="Érvénytelen vagy lejárt token.",
++        headers={"WWW-Authenticate": "Bearer"},
++    )
++    if credentials is None:
++        raise unauthorized
++    try:
++        user_id = decode_access_token(credentials.credentials)
++    except InvalidTokenError:
++        raise unauthorized
++    user = repo.find_by_id(user_id)
++    if user is None:  # pl. azóta törölték a fiókot
++        raise unauthorized
++    return user
++
++
++def _to_user_out(user: dict) -> UserOut:
++    # Szándékosan csak ezeket a mezőket adjuk vissza – a password_hash soha nem hagyja el a szervert
++    return UserOut(
++        user_id=user["user_id"],
++        username=user["username"],
++        email=user["email"],
++        created_at=user.get("created_at"),
++    )
++
++
++def _token_response(user: dict) -> TokenResponse:
++    return TokenResponse(
++        access_token=create_access_token(user["user_id"], user["username"]),
++        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
++        user=_to_user_out(user),
++    )
++
++
++# =============================================================================
++# VÉGPONTOK
++# =============================================================================
++
++@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
++def register(body: RegisterRequest, repo: UserRepository = Depends(get_user_repository)):
++    password_hash = hash_password(body.password)
++    try:
++        user = repo.create_user(body.username, body.email, password_hash)
++    except UserAlreadyExistsError as e:
++        message = (
++            "Ez a felhasználónév már foglalt."
++            if e.field == "username"
++            else "Ezzel az email címmel már regisztráltak."
++        )
++        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message)
++    return _token_response(user)
++
++
++@router.post("/login", response_model=TokenResponse)
++def login(body: LoginRequest, repo: UserRepository = Depends(get_user_repository)):
++    identifier = body.identifier.strip()
++    if "@" in identifier:
++        user = repo.find_by_email(identifier.lower())
++    else:
++        user = repo.find_by_username(identifier)
++
++    if user is None:
++        # Ugyanannyi ideig dolgozunk, mintha létezne a felhasználó
++        verify_dummy_password(body.password)
++        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=INVALID_CREDENTIALS)
++
++    if not verify_password(body.password, user["password_hash"]):
++        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=INVALID_CREDENTIALS)
++
++    # Ha azóta erősebb hash-paraméterekre váltottunk, most frissítjük a tárolt hash-t
++    if password_needs_rehash(user["password_hash"]):
++        repo.update_password_hash(user["user_id"], hash_password(body.password))
++
++    return _token_response(user)
++
++
++@router.get("/me", response_model=UserOut)
++def me(user: dict = Depends(get_current_user)):
++    return _to_user_out(user)
+diff --git a/backend/db_user_repository.py b/backend/db_user_repository.py
+new file mode 100644
+index 0000000..c549a8d
+--- /dev/null
++++ b/backend/db_user_repository.py
+@@ -0,0 +1,112 @@
++"""
++db_user_repository.py – PostgreSQL alapú UserRepository implementáció
++A users táblát kezeli (schema.sql 16. tábla).
++
++Kis- és nagybetűk:
++  - Az emailt mindig kisbetűsítve mentjük és keressük.
++  - A felhasználónevet a megadott formában mentjük (megjelenítéshez),
++    de keresni és egyediséget ellenőrizni kisbetűtől függetlenül kell
++    (a schema.sql-ben ehhez van egy LOWER(username) egyedi index is).
++"""
++
++from typing import Optional, Protocol
++
++import psycopg2
++from psycopg2 import errors
++
++from database import get_db_connection
++
++
++class UserAlreadyExistsError(Exception):
++    """A felhasználónév vagy az email már foglalt."""
++
++    def __init__(self, field: str):
++        super().__init__(field)
++        self.field = field  # "username" vagy "email"
++
++
++class UserRepository(Protocol):
++    def find_by_username(self, username: str) -> Optional[dict]: ...
++    def find_by_email(self, email: str) -> Optional[dict]: ...
++    def find_by_id(self, user_id: int) -> Optional[dict]: ...
++    def create_user(self, username: str, email: str, password_hash: str) -> dict: ...
++    def update_password_hash(self, user_id: int, password_hash: str) -> None: ...
++
++
++_USER_COLUMNS = "user_id, username, email, password_hash, created_at"
++
++
++class DbUserRepository:
++    """Valódi adatbázis implementáció a UserRepository protokollhoz."""
++
++    def _fetch_one(self, query: str, params: tuple) -> Optional[dict]:
++        conn = get_db_connection()
++        try:
++            with conn.cursor() as cur:
++                cur.execute(query, params)
++                row = cur.fetchone()
++                return dict(row) if row else None
++        finally:
++            conn.close()
++
++    def find_by_username(self, username: str) -> Optional[dict]:
++        return self._fetch_one(
++            f"SELECT {_USER_COLUMNS} FROM users WHERE LOWER(username) = LOWER(%s)",
++            (username,),
++        )
++
++    def find_by_email(self, email: str) -> Optional[dict]:
++        return self._fetch_one(
++            f"SELECT {_USER_COLUMNS} FROM users WHERE email = LOWER(%s)",
++            (email,),
++        )
++
++    def find_by_id(self, user_id: int) -> Optional[dict]:
++        return self._fetch_one(
++            f"SELECT {_USER_COLUMNS} FROM users WHERE user_id = %s",
++            (user_id,),
++        )
++
++    def create_user(self, username: str, email: str, password_hash: str) -> dict:
++        # Előzetes ellenőrzés, hogy pontos hibaüzenetet tudjunk adni
++        if self.find_by_username(username):
++            raise UserAlreadyExistsError("username")
++        if self.find_by_email(email):
++            raise UserAlreadyExistsError("email")
++
++        conn = get_db_connection()
++        try:
++            with conn.cursor() as cur:
++                cur.execute(
++                    f"""
++                    INSERT INTO users (username, email, password_hash)
++                    VALUES (%s, LOWER(%s), %s)
++                    RETURNING {_USER_COLUMNS}
++                    """,
++                    (username, email, password_hash),
++                )
++                row = cur.fetchone()
++            conn.commit()
++            return dict(row)
++        except errors.UniqueViolation as e:
++            # Versenyhelyzet: két kérés egyszerre regisztrál ugyanazzal az adattal
++            conn.rollback()
++            constraint = (e.diag.constraint_name or "").lower()
++            raise UserAlreadyExistsError("email" if "email" in constraint else "username") from e
++        except psycopg2.Error:
++            conn.rollback()
++            raise
++        finally:
++            conn.close()
++
++    def update_password_hash(self, user_id: int, password_hash: str) -> None:
++        conn = get_db_connection()
++        try:
++            with conn.cursor() as cur:
++                cur.execute(
++                    "UPDATE users SET password_hash = %s WHERE user_id = %s",
++                    (password_hash, user_id),
++                )
++            conn.commit()
++        finally:
++            conn.close()
+diff --git a/backend/main.py b/backend/main.py
+index ce57f11..8b92899 100644
+--- a/backend/main.py
++++ b/backend/main.py
+@@ -6,6 +6,7 @@ from typing import List, Optional
+ from database import get_db_connection
+ from db_trip_repository import DbTripRepository
+ from schedule_search_service import ScheduleSearchService
++from auth import router as auth_router
+ 
+ app = FastAPI(title="Menetrend Kereső API", version="1.0.0")
+ 
+@@ -18,6 +19,9 @@ app.add_middleware(
+     allow_headers=["*"],
+ )
+ 
++# Regisztráció / belépés végpontok (/api/auth/...)
++app.include_router(auth_router)
++
+ # Keresési kérés struktúrája a frontend felől
+ class SearchRequest(BaseModel):
+     origin: str
+diff --git a/backend/requirements-dev.txt b/backend/requirements-dev.txt
+new file mode 100644
+index 0000000..b9caaa9
+--- /dev/null
++++ b/backend/requirements-dev.txt
+@@ -0,0 +1,2 @@
++pytest==8.1.1
++httpx==0.27.0
+diff --git a/backend/requirements.txt b/backend/requirements.txt
+index 94373ab..b82a9f3 100644
+--- a/backend/requirements.txt
++++ b/backend/requirements.txt
+@@ -1,4 +1,7 @@
+ fastapi==0.110.0
+ uvicorn==0.28.0
+ psycopg2-binary==2.9.9
+-pydantic==2.6.4
+\ No newline at end of file
++pydantic==2.6.4
++argon2-cffi==23.1.0
++PyJWT==2.8.0
++email-validator==2.1.1
+diff --git a/backend/security.py b/backend/security.py
+new file mode 100644
+index 0000000..ff9097d
+--- /dev/null
++++ b/backend/security.py
+@@ -0,0 +1,116 @@
++"""
++security.py – Jelszó-hash-elés (Argon2id) és JWT token kezelés
++================================================================
++
++Jelszavak:
++  - Argon2id algoritmus (argon2-cffi), az OWASP elsődleges ajánlása.
++  - A salt-ot a könyvtár minden hash-hez véletlenszerűen generálja, és
++    a paraméterekkel együtt egyetlen stringben tárolja, pl.:
++      $argon2id$v=19$m=65536,t=3,p=4$<salt>$<hash>
++    Így a users.password_hash oszlopba elég ezt az egy stringet menteni.
++  - needs_rehash(): ha később szigorítjuk a paramétereket, a régi hash-eket
++    belépéskor automatikusan újra lehet hash-elni (migráció nélkül).
++
++Tokenek:
++  - HS256-tal aláírt JWT, lejárati idővel.
++  - A titkos kulcs a JWT_SECRET környezeti változóból jön. Ha nincs megadva,
++    indításkor generálunk egy véletlen kulcsot (fejlesztéshez megfelel, de
++    ilyenkor újraindítás után minden kiadott token érvénytelenné válik).
++"""
++
++import os
++import secrets
++import warnings
++from datetime import datetime, timedelta, timezone
++
++import jwt
++from argon2 import PasswordHasher
++from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
++
++# =============================================================================
++# JELSZÓ-HASH-ELÉS
++# =============================================================================
++
++# Az argon2-cffi alapértelmezései az RFC 9106 "low memory" profilját követik:
++# time_cost=3, memory_cost=64 MiB, parallelism=4, 16 bájtos salt, 32 bájtos hash.
++_password_hasher = PasswordHasher()
++
++# Előre kiszámolt hash egy véletlen jelszóhoz. Akkor ellenőrzünk ellene, ha a
++# felhasználó nem létezik, így a válaszidő alapján nem lehet kitalálni,
++# hogy egy felhasználónév / email regisztrálva van-e (timing attack).
++_DUMMY_HASH = _password_hasher.hash(secrets.token_urlsafe(32))
++
++
++def hash_password(password: str) -> str:
++    """Jelszó hash-elése Argon2id-vel. Az eredmény tartalmazza a salt-ot és a paramétereket."""
++    return _password_hasher.hash(password)
++
++
++def verify_password(password: str, password_hash: str) -> bool:
++    """True, ha a jelszó egyezik a tárolt hash-sel. Hibás formátumú hash esetén is False."""
++    try:
++        return _password_hasher.verify(password_hash, password)
++    except (VerifyMismatchError, VerificationError, InvalidHashError):
++        return False
++
++
++def verify_dummy_password(password: str) -> None:
++    """Nem létező felhasználónál hívjuk, hogy a válaszidő ugyanannyi legyen, mint létezőnél."""
++    verify_password(password, _DUMMY_HASH)
++
++
++def password_needs_rehash(password_hash: str) -> bool:
++    """True, ha a hash a jelenleginél gyengébb paraméterekkel készült."""
++    try:
++        return _password_hasher.check_needs_rehash(password_hash)
++    except InvalidHashError:
++        return True
++
++
++# =============================================================================
++# JWT TOKENEK
++# =============================================================================
++
++JWT_ALGORITHM = "HS256"
++ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
++
++_jwt_secret = os.getenv("JWT_SECRET")
++if not _jwt_secret:
++    warnings.warn(
++        "JWT_SECRET nincs beállítva – véletlen kulcsot használunk. "
++        "Újraindítás után a kiadott tokenek érvénytelenek lesznek. "
++        "Éles környezetben mindenképp állítsd be!",
++        RuntimeWarning,
++    )
++    _jwt_secret = secrets.token_urlsafe(64)
++JWT_SECRET: str = _jwt_secret
++
++
++class InvalidTokenError(Exception):
++    """Lejárt, hamisított vagy hibás formátumú token."""
++
++
++def create_access_token(user_id: int, username: str) -> str:
++    """Aláírt JWT a felhasználó azonosítójával és lejárati idővel."""
++    now = datetime.now(timezone.utc)
++    payload = {
++        "sub": str(user_id),  # a JWT szabvány szerint a "sub" string
++        "username": username,
++        "iat": now,
++        "exp": now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
++    }
++    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
++
++
++def decode_access_token(token: str) -> int:
++    """Ellenőrzi a token aláírását és lejáratát, és visszaadja a user_id-t."""
++    try:
++        payload = jwt.decode(
++            token,
++            JWT_SECRET,
++            algorithms=[JWT_ALGORITHM],  # fix lista: kizárja az "alg: none" támadást
++            options={"require": ["exp", "iat", "sub"]},
++        )
++        return int(payload["sub"])
++    except (jwt.PyJWTError, ValueError, KeyError) as e:
++        raise InvalidTokenError(str(e)) from e
+diff --git a/backend/test_auth.py b/backend/test_auth.py
+new file mode 100644
+index 0000000..f136636
+--- /dev/null
++++ b/backend/test_auth.py
+@@ -0,0 +1,265 @@
++"""
++test_auth.py – Tesztek a jelszó-hash-eléshez, a tokenekhez és az auth végpontokhoz
++==================================================================================
++
++STUB: StubUserRepository – memóriában tárolja a felhasználókat,
++      így nem kell élő adatbázis a tesztekhez.
++
++Futtatás (a backend mappából):
++    pip install -r requirements.txt -r requirements-dev.txt
++    pytest test_auth.py -v
++"""
++
++import os
++from datetime import datetime, timedelta, timezone
++
++os.environ.setdefault("JWT_SECRET", "teszt-titkos-kulcs-csak-tesztekhez-1234567890")
++
++import jwt
++import pytest
++from argon2 import PasswordHasher
++from fastapi.testclient import TestClient
++
++from auth import get_user_repository
++from db_user_repository import UserAlreadyExistsError
++from main import app
++from security import (
++    JWT_ALGORITHM,
++    JWT_SECRET,
++    InvalidTokenError,
++    create_access_token,
++    decode_access_token,
++    hash_password,
++    password_needs_rehash,
++    verify_password,
++)
++
++# =============================================================================
++# STUB
++# =============================================================================
++
++class StubUserRepository:
++    def __init__(self):
++        self.users: dict[int, dict] = {}
++        self._next_id = 1
++
++    def find_by_username(self, username):
++        return next((u for u in self.users.values() if u["username"].lower() == username.lower()), None)
++
++    def find_by_email(self, email):
++        return next((u for u in self.users.values() if u["email"] == email.lower()), None)
++
++    def find_by_id(self, user_id):
++        return self.users.get(user_id)
++
++    def create_user(self, username, email, password_hash):
++        if self.find_by_username(username):
++            raise UserAlreadyExistsError("username")
++        if self.find_by_email(email):
++            raise UserAlreadyExistsError("email")
++        user = {
++            "user_id": self._next_id,
++            "username": username,
++            "email": email.lower(),
++            "password_hash": password_hash,
++            "created_at": datetime.now(),
++        }
++        self.users[self._next_id] = user
++        self._next_id += 1
++        return user
++
++    def update_password_hash(self, user_id, password_hash):
++        self.users[user_id]["password_hash"] = password_hash
++
++
++@pytest.fixture
++def repo():
++    return StubUserRepository()
++
++
++@pytest.fixture
++def client(repo):
++    app.dependency_overrides[get_user_repository] = lambda: repo
++    yield TestClient(app)
++    app.dependency_overrides.clear()
++
++
++def register(client, username="teszt_elek", email="Elek@Example.com", password="nagyonTitkos123", again=None):
++    return client.post("/api/auth/register", json={
++        "username": username,
++        "email": email,
++        "password": password,
++        "passwordAgain": password if again is None else again,
++    })
++
++
++# =============================================================================
++# JELSZÓ-HASH-ELÉS
++# =============================================================================
++
++def test_hash_nem_tartalmazza_a_jelszot_es_argon2id():
++    h = hash_password("nagyonTitkos123")
++    assert "nagyonTitkos123" not in h
++    assert h.startswith("$argon2id$")
++
++
++def test_ugyanaz_a_jelszo_mas_hasht_ad_salt_miatt():
++    assert hash_password("ugyanaz123") != hash_password("ugyanaz123")
++
++
++def test_helyes_es_hibas_jelszo_ellenorzese():
++    h = hash_password("nagyonTitkos123")
++    assert verify_password("nagyonTitkos123", h)
++    assert not verify_password("nagyonTitkos124", h)
++    assert not verify_password("", h)
++
++
++def test_hibas_formatumu_hash_nem_dob_kivetelt():
++    assert not verify_password("barmi", "ez-nem-egy-hash")
++
++
++def test_ekezetes_es_hosszu_jelszo():
++    jelszo = "Árvíztűrő tükörfúrógép " * 5  # bcrypt 72 bájtnál levágná, Argon2 nem
++    h = hash_password(jelszo)
++    assert verify_password(jelszo, h)
++    assert not verify_password(jelszo[:-1], h)
++
++
++def test_gyenge_parameteru_hash_rehash_igenyes():
++    gyenge = PasswordHasher(time_cost=1, memory_cost=8192, parallelism=1).hash("x")
++    assert password_needs_rehash(gyenge)
++    assert not password_needs_rehash(hash_password("x"))
++
++
++# =============================================================================
++# TOKENEK
++# =============================================================================
++
++def test_token_oda_vissza():
++    assert decode_access_token(create_access_token(42, "valaki")) == 42
++
++
++def test_lejart_token_ervenytelen():
++    now = datetime.now(timezone.utc)
++    token = jwt.encode(
++        {"sub": "1", "iat": now - timedelta(hours=2), "exp": now - timedelta(hours=1)},
++        JWT_SECRET, algorithm=JWT_ALGORITHM,
++    )
++    with pytest.raises(InvalidTokenError):
++        decode_access_token(token)
++
++
++def test_mas_kulccsal_alairt_token_ervenytelen():
++    now = datetime.now(timezone.utc)
++    token = jwt.encode({"sub": "1", "iat": now, "exp": now + timedelta(hours=1)},
++                       "hamis-kulcs", algorithm=JWT_ALGORITHM)
++    with pytest.raises(InvalidTokenError):
++        decode_access_token(token)
++
++
++def test_alairas_nelkuli_alg_none_token_ervenytelen():
++    now = datetime.now(timezone.utc)
++    token = jwt.encode({"sub": "1", "iat": now, "exp": now + timedelta(hours=1)}, None, algorithm="none")
++    with pytest.raises(InvalidTokenError):
++        decode_access_token(token)
++
++
++# =============================================================================
++# VÉGPONTOK
++# =============================================================================
++
++def test_regisztracio_sikeres_es_hash_kerul_a_dbbe(client, repo):
++    r = register(client)
++    assert r.status_code == 201
++    data = r.json()
++    assert data["token_type"] == "bearer"
++    assert data["user"]["username"] == "teszt_elek"
++    assert data["user"]["email"] == "elek@example.com"
++    assert "password_hash" not in data["user"]
++
++    tarolt = repo.users[1]["password_hash"]
++    assert tarolt.startswith("$argon2id$")
++    assert verify_password("nagyonTitkos123", tarolt)
++
++
++def test_regisztracio_nem_egyezo_jelszavak(client):
++    assert register(client, again="masvalami123").status_code == 422
++
++
++def test_regisztracio_tul_rovid_jelszo(client):
++    assert register(client, password="rovid").status_code == 422
++
++
++def test_regisztracio_tul_hosszu_jelszo(client):
++    assert register(client, password="a" * 129).status_code == 422
++
++
++@pytest.mark.parametrize("nev", ["ab", "van szokoz", "kukac@benne", "x" * 51])
++def test_regisztracio_ervenytelen_felhasznalonev(client, nev):
++    assert register(client, username=nev).status_code == 422
++
++
++def test_regisztracio_ervenytelen_email(client):
++    assert register(client, email="nem-email").status_code == 422
++
++
++def test_regisztracio_foglalt_nev_kisbetutol_fuggetlenul(client):
++    register(client)
++    r = register(client, username="TESZT_ELEK", email="masik@example.com")
++    assert r.status_code == 409
++    assert "felhasználónév" in r.json()["detail"]
++
++
++def test_regisztracio_foglalt_email(client):
++    register(client)
++    r = register(client, username="masik", email="ELEK@example.com")
++    assert r.status_code == 409
++    assert "email" in r.json()["detail"]
++
++
++@pytest.mark.parametrize("identifier", ["teszt_elek", "Teszt_Elek", "elek@example.com", "  ELEK@Example.com "])
++def test_belepes_nevvel_vagy_emaillel(client, identifier):
++    register(client)
++    r = client.post("/api/auth/login", json={"identifier": identifier, "password": "nagyonTitkos123"})
++    assert r.status_code == 200
++    assert decode_access_token(r.json()["access_token"]) == 1
++
++
++def test_belepes_rossz_jelszo_es_nem_letezo_user_ugyanazt_az_uzenetet_adja(client):
++    register(client)
++    rossz_jelszo = client.post("/api/auth/login", json={"identifier": "teszt_elek", "password": "rossz12345"})
++    nincs_ilyen = client.post("/api/auth/login", json={"identifier": "senki", "password": "rossz12345"})
++    assert rossz_jelszo.status_code == nincs_ilyen.status_code == 401
++    assert rossz_jelszo.json() == nincs_ilyen.json()
++
++
++def test_belepes_gyenge_hash_automatikusan_frissul(client, repo):
++    gyenge = PasswordHasher(time_cost=1, memory_cost=8192, parallelism=1).hash("regiJelszo123")
++    repo.create_user("regi_user", "regi@example.com", gyenge)
++    r = client.post("/api/auth/login", json={"identifier": "regi_user", "password": "regiJelszo123"})
++    assert r.status_code == 200
++    uj = repo.users[1]["password_hash"]
++    assert uj != gyenge
++    assert not password_needs_rehash(uj)
++    assert verify_password("regiJelszo123", uj)
++
++
++def test_me_tokennel(client):
++    token = register(client).json()["access_token"]
++    r = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
++    assert r.status_code == 200
++    assert r.json()["username"] == "teszt_elek"
++    assert "password_hash" not in r.json()
++
++
++def test_me_token_nelkul_es_hibas_tokennel(client):
++    assert client.get("/api/auth/me").status_code == 401
++    r = client.get("/api/auth/me", headers={"Authorization": "Bearer ez.nem.token"})
++    assert r.status_code == 401
++    assert r.headers["www-authenticate"] == "Bearer"
++
++
++def test_me_torolt_felhasznalo_tokenje(client, repo):
++    token = register(client).json()["access_token"]
++    repo.users.clear()
++    assert client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"}).status_code == 401
+diff --git a/docker-compose.yml b/docker-compose.yml
+index a4c7814..a45be35 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -27,6 +27,9 @@ services:
+       DB_USER: postgres
+       DB_PASSWORD: password
+       DB_PORT: "5432"
++      # Tokenek aláírókulcsa – élesben .env fájlból vagy titokkezelőből jöjjön!
++      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-3f9a1c7e5b2d4a6f8e0c1b3d5f7a9c2e}
++      ACCESS_TOKEN_EXPIRE_MINUTES: "60"
+     ports:
+       - "8000:8000"
+     volumes:
+diff --git a/schema.sql b/schema.sql
+index 983f015..ac8f09e 100644
+--- a/schema.sql
++++ b/schema.sql
+@@ -262,6 +262,10 @@ CREATE TABLE users (
+     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+ );
+ 
++-- A felhasználónév kis- és nagybetűtől függetlenül is egyedi legyen ("Peti" és "peti" ne lehessen két fiók).
++-- Az emailt a backend mindig kisbetűsítve menti, arra a fenti UNIQUE elég.
++CREATE UNIQUE INDEX users_username_lower_key ON users (LOWER(username));
++
+ 
+ 
+ -- 17. Barát kapcsolatok tábla (Kétirányú vagy jellegű kapcsolat kezelése)
