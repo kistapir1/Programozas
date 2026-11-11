@@ -262,6 +262,10 @@ CREATE TABLE users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- A felhasználónév kis- és nagybetűtől függetlenül is egyedi legyen ("Peti" és "peti" ne lehessen két fiók).
+-- Az emailt a backend mindig kisbetűsítve menti, arra a fenti UNIQUE elég.
+CREATE UNIQUE INDEX users_username_lower_key ON users (LOWER(username));
+
 
 
 -- 17. Barát kapcsolatok tábla (Kétirányú vagy jellegű kapcsolat kezelése)
