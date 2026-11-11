@@ -27,6 +27,9 @@ services:
       DB_USER: postgres
       DB_PASSWORD: password
       DB_PORT: "5432"
+      # Tokenek aláírókulcsa – élesben .env fájlból vagy titokkezelőből jöjjön!
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-3f9a1c7e5b2d4a6f8e0c1b3d5f7a9c2e}
+      ACCESS_TOKEN_EXPIRE_MINUTES: "60"
     ports:
       - "8000:8000"
     volumes:
