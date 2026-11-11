@@ -31,7 +31,10 @@ def search_stations(q: str = Query(..., min_length=1)):
         from database import get_db_connection
         conn = get_db_connection()
         cur = conn.cursor()
-        query = "SELECT station_code, name, city, station_type FROM stations WHERE name ILIKE %s OR city ILIKE %s LIMIT 10"
+        #query = "SELECT station_code, name, city, station_type FROM stations WHERE name ILIKE %s OR city ILIKE %s LIMIT 10"
+        #nem teljesen ugyan az mivel nincs city mező a stops táblában
+        #de a stops_name tartalmazza a település nevét is
+        query = "SELECT s.stop_id, s.stop_name AS name, rt.type_name AS jarmu_tipus FROM stops s JOIN stop_times st ON s.stop_id = st.stop_id JOIN trips t ON st.trip_id = t.trip_id JOIN routes r ON t.route_id = r.route_id JOIN route_types rt ON r.route_type = rt.route_type"
         like_term = f"%{q}%"
         cur.execute(query, (like_term, like_term))
         stations = cur.fetchall()

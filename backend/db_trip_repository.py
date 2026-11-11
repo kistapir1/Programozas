@@ -18,35 +18,68 @@ class DbTripRepository:
         conn = get_db_connection()
         cur = conn.cursor()
 
+        #query = """
+        #    SELECT
+        #        ST1.trip_id,
+        #        R.route_short_name,
+        #        R.route_long_name,
+        #        R.transport_mode,
+        #        R.operator,
+        #        S1.name AS origin_station,
+        #        ST1.departure_time::text AS departure_time,
+        #        S2.name AS destination_station,
+        #        ST2.arrival_time::text AS arrival_time
+        #    FROM stop_times ST1
+        #    JOIN stop_times ST2 ON ST1.trip_id = ST2.trip_id
+        #    JOIN trips T ON ST1.trip_id = T.trip_id
+        #    JOIN routes R ON T.route_id = R.route_id
+        #    JOIN stations S1 ON ST1.station_id = S1.station_id
+        #    JOIN stations S2 ON ST2.station_id = S2.station_id
+        #    WHERE (S1.name ILIKE %s OR S1.city ILIKE %s)
+        #      AND (S2.name ILIKE %s OR S2.city ILIKE %s)
+        #      AND ST1.stop_sequence < ST2.stop_sequence
+        #"""
+        
         query = """
             SELECT
                 ST1.trip_id,
                 R.route_short_name,
                 R.route_long_name,
-                R.transport_mode,
-                R.operator,
-                S1.name AS origin_station,
+                RT.type_name AS transport_mode,
+                A.agency_name AS operator,
+                S1.stop_name AS origin_station,
                 ST1.departure_time::text AS departure_time,
-                S2.name AS destination_station,
+                S2.stop_name AS destination_station,
                 ST2.arrival_time::text AS arrival_time
             FROM stop_times ST1
             JOIN stop_times ST2 ON ST1.trip_id = ST2.trip_id
             JOIN trips T ON ST1.trip_id = T.trip_id
             JOIN routes R ON T.route_id = R.route_id
-            JOIN stations S1 ON ST1.station_id = S1.station_id
-            JOIN stations S2 ON ST2.station_id = S2.station_id
-            WHERE (S1.name ILIKE %s OR S1.city ILIKE %s)
-              AND (S2.name ILIKE %s OR S2.city ILIKE %s)
+            JOIN route_types RT ON R.route_type = RT.route_type
+            JOIN agency A ON R.agency_id = A.agency_id
+            JOIN stops S1 ON ST1.stop_id = S1.stop_id
+            JOIN stops S2 ON ST2.stop_id = S2.stop_id
+            WHERE (S1.stop_name ILIKE %s)
+              AND (S2.stop_name ILIKE %s)
               AND ST1.stop_sequence < ST2.stop_sequence
         """
 
+        #params: list = [
+        #    f"%{origin}%", f"%{origin}%",
+        #    f"%{destination}%", f"%{destination}%",
+        #]
+        
         params: list = [
-            f"%{origin}%", f"%{origin}%",
-            f"%{destination}%", f"%{destination}%",
+            f"%{origin}%",
+            f"%{destination}%",
         ]
 
+        #if transport_modes:
+        #   query += " AND R.transport_mode = ANY(%s)"
+        #  params.append(transport_modes)
+        
         if transport_modes:
-            query += " AND R.transport_mode = ANY(%s)"
+            query += " AND RT.type_name = ANY(%s)"
             params.append(transport_modes)
 
         cur.execute(query, params)
