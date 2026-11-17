@@ -113,13 +113,40 @@ def run_import():
         conn.commit()
         print(f"[+] Stop times kész ({round(time.time() - start_t, 1)} mp alatt).")
 
+    # 7. Calendar dates import
+    cal_path = os.path.join(gtfs_dir, "calendar_dates.txt")
+    if os.path.exists(cal_path):
+        print("[*] calendar_dates.txt importálása...")
+        with open(cal_path, "r", encoding="utf-8-sig") as f:
+            cur.copy_expert("COPY calendar_dates (service_id, date, exception_type) FROM STDIN WITH (FORMAT csv, HEADER true)", f)
+        conn.commit()
+        print("[+] Calendar dates kész.")
+
+    # 8. Shapes import
+    shapes_path = os.path.join(gtfs_dir, "shapes.txt")
+    if os.path.exists(shapes_path):
+        print("[*] shapes.txt importálása...")
+        with open(shapes_path, "r", encoding="utf-8-sig") as f:
+            cur.copy_expert("COPY shapes (shape_id, shape_pt_sequence, shape_pt_lat, shape_pt_lon, shape_dist_traveled) FROM STDIN WITH (FORMAT csv, HEADER true)", f)
+        conn.commit()
+        print("[+] Shapes kész.")
+
+    # 9. Pathways import
+    pathways_path = os.path.join(gtfs_dir, "pathways.txt")
+    if os.path.exists(pathways_path):
+        print("[*] pathways.txt importálása...")
+        with open(pathways_path, "r", encoding="utf-8-sig") as f:
+            cur.copy_expert("COPY pathways (pathway_id, pathway_mode, is_bidirectional, from_stop_id, to_stop_id, traversal_time) FROM STDIN WITH (FORMAT csv, HEADER true)", f)
+        conn.commit()
+        print("[+] Pathways kész.")
+
     # Visszaállítjuk a triggereket és indexeket
     cur.execute("SET session_replication_role = 'origin';")
     conn.commit()
 
     # Statisztikák kiírása
     print("\n[=== ADATBÁZIS STATISZTIKÁK ===]")
-    for table in ["agency", "routes", "stops", "trips", "stop_times", "route_types"]:
+    for table in ["agency", "routes", "stops", "trips", "stop_times", "calendar_dates", "shapes", "pathways", "route_types", "pathway_modes"]:
         cur.execute(f"SELECT count(*) FROM {table}")
         count = cur.fetchone()['count']
         print(f"  - {table}: {count:,} sor")

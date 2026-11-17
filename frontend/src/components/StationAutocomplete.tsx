@@ -21,10 +21,18 @@ export default function StationAutocomplete({
   const [selectedIndex, setSelectedIndex] = useState<number>(-1);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const justSelectedRef = useRef(false);
 
   // Lekérés a backend /api/stations végpontról
   useEffect(() => {
+    // Ha épp most választottunk elemet, ne indítsunk új keresést
+    if (justSelectedRef.current) {
+      justSelectedRef.current = false;
+      return;
+    }
+
     if (!value || value.trim().length < 2) {
       setSuggestions([]);
       setIsOpen(false);
@@ -81,9 +89,11 @@ export default function StationAutocomplete({
   }, []);
 
   const handleSelect = (stationName: string) => {
+    justSelectedRef.current = true;
     onChange(stationName);
     setIsOpen(false);
     setSuggestions([]);
+    inputRef.current?.blur();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -110,6 +120,7 @@ export default function StationAutocomplete({
   return (
     <div className="autocomplete-container" ref={containerRef}>
       <input
+        ref={inputRef}
         type="text"
         className={className}
         placeholder={placeholder}

@@ -1,7 +1,8 @@
 import { useState } from "react";
 import Sidebar from "./components/Sidebar";
 import Navbar from "./components/Navbar";
-import AuthPanel from "./components/AuthPanel";
+import AuthPanel, {type AuthResponse} from "./components/AuthPanel";
+import Profile from "./components/Profile";
 import "./index.css";
 
 // Az API végpont base URL-je
@@ -42,12 +43,35 @@ const MODE_LABELS: Record<string, { label: string; icon: string }> = {
   "Vasút":                 { label: "Vasút",     icon: "🚆" },
 };
 
+
 function App() {
   const [results, setResults] = useState<ScheduleResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+  const [accessToken, setAccessToken] = useState<string | null>(
+    () => localStorage.getItem("access_token")
+  );
+  const [currentUser, setCurrentUser] = useState<AuthResponse["user"] | null>(null);
+
+  const handleLoginSuccess = (auth: AuthResponse) => {
+    localStorage.setItem("access_token", auth.access_token);
+    setAccessToken(auth.access_token);
+    setCurrentUser(auth.user);
+    setShowAuth(false);
+  };
+
+  const handleRegisterSuccess = (auth: AuthResponse) => {};
+
+  // Kijelentkezés
+  const handleLogout = () => {
+    localStorage.removeItem("access_token");
+    setAccessToken(null);
+    setCurrentUser(null);
+    setShowProfile(false);
+  };
 
   const handleSearch = async (params: SearchParams) => {
     if (!params.origin.trim() || !params.destination.trim()) {
@@ -83,11 +107,25 @@ function App() {
 
   return (
     <>
-      <Navbar onAuthClick={() => setShowAuth(true)} />
-
+      <Navbar 
+        onAuthClick={() => setShowAuth(true)}
+        isLoggedIn={Boolean(accessToken)}
+        onLogout={handleLogout}
+        onProfileClick={() => setShowProfile(true)}
+        onSavedRoutesClick={() => console.log("Mentett útvonalak – TODO")}
+        onUserSearch={(query) => console.log("Felhasználó keresése:", query)}
+      />
         {showAuth ? (
           <div className="app-shell">
-            <AuthPanel onBack={() => setShowAuth(false)} />
+            <AuthPanel 
+              onBack={() => setShowAuth(false)} 
+              onLogin={handleLoginSuccess}
+              onRegister={handleRegisterSuccess}
+            />
+          </div>
+        ): showProfile ? (
+          <div className="app-shell">
+            <Profile user={currentUser} onBack={() => setShowProfile(false)} />
           </div>
         ):(
       <div className="app-shell">
