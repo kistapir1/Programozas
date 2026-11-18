@@ -13,7 +13,11 @@ const TRANSPORT_OPTIONS: CheckboxOption[] = [
   { id: "Komp",                  label: "Komp" },
 ];
 
-const OTHER_DROPDOWNS = ["Egyéb"];
+const EXTRA_OPTIONS: CheckboxOption[] = [
+  { id: "bikes_allowed", label: "Bicikli tároló / Kerékpárszállítás" },
+  { id: "wheelchair_accessible", label: "Kerekesszékkel való utazás (jármű)" },
+  { id: "wheelchair_boarding", label: "Akadálymentes megállóhely" },
+];
 
 const MAX_TRANSFERS_LIMIT = 5;
 
@@ -47,6 +51,10 @@ interface SidebarProps {
     waypoints: string[];
     transport_modes: string[];
     max_transfers: number;
+    min_transfer_time: number;
+    bikes_allowed: boolean;
+    wheelchair_accessible: boolean;
+    wheelchair_boarding: boolean;
     time_mode: TimeMode;
     date: string;
     time: string;
@@ -61,8 +69,10 @@ function Sidebar({ onSearch }: SidebarProps) {
   });
 
   const [selectedModes, setSelectedModes] = useState<string[]>([]);
+  const [selectedExtras, setSelectedExtras] = useState<string[]>([]);
 
   const [maxTransfers, setMaxTransfers] = useState<number>(2);
+  const [minTransferTime, setMinTransferTime] = useState<number>(5);
   const [timeMode, setTimeMode] = useState<TimeMode>("departure");
   const [dateValue, setDateValue] = useState<string>(getCurrentDateString());
   const [timeValue, setTimeValue] = useState<string>(getCurrentTimeString()); 
@@ -74,6 +84,10 @@ function Sidebar({ onSearch }: SidebarProps) {
       waypoints: waypointValues.waypoints,
       transport_modes: selectedModes,
       max_transfers: maxTransfers,
+      min_transfer_time: minTransferTime,
+      bikes_allowed: selectedExtras.includes("bikes_allowed"),
+      wheelchair_accessible: selectedExtras.includes("wheelchair_accessible"),
+      wheelchair_boarding: selectedExtras.includes("wheelchair_boarding"),
       time_mode: timeMode,
       date: dateValue,
       time: timeValue,
@@ -115,9 +129,42 @@ function Sidebar({ onSearch }: SidebarProps) {
         </Dropdown>
 
         <Dropdown title="Átszállásra szánt idő">
-          <p style={{ color: "#94a3b8", fontSize: "0.88rem" }}>
-            Tartalom hamarosan…
-          </p>
+          <div className="stepper-wrapper">
+            <span className="stepper-label">Minimum átszállási idő:</span>
+            <div className="stepper-control">
+              <input
+                type="number"
+                min={0}
+                max={60}
+                value={minTransferTime}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  if (isNaN(val)) setMinTransferTime(0);
+                  else setMinTransferTime(Math.min(60, Math.max(0, val)));
+                }}
+                className="stepper-number-input"
+              />
+              <span className="stepper-unit-text">perc</span>
+              <div className="stepper-arrows">
+                <button
+                  type="button"
+                  className="stepper-arrow-btn"
+                  onClick={() => setMinTransferTime((prev) => Math.min(60, prev + 1))}
+                  title="Növelés"
+                >
+                  ▲
+                </button>
+                <button
+                  type="button"
+                  className="stepper-arrow-btn"
+                  onClick={() => setMinTransferTime((prev) => Math.max(0, prev - 1))}
+                  title="Csökkentés"
+                >
+                  ▼
+                </button>
+              </div>
+            </div>
+          </div>
         </Dropdown>
 
         {/* Indulási időpont – dátum/idő választó */}
@@ -174,14 +221,10 @@ function Sidebar({ onSearch }: SidebarProps) {
           </div>
         </Dropdown>
 
-        {/* Többi dropdown – egyelőre üres */}
-        {OTHER_DROPDOWNS.map((title) => (
-          <Dropdown key={title} title={title}>
-            <p style={{ color: "#94a3b8", fontSize: "0.88rem" }}>
-              Tartalom hamarosan…
-            </p>
-          </Dropdown>
-        ))}
+        {/* Egyéb opciók: Kerékpár és Akadálymentesség */}
+        <Dropdown title="Egyéb">
+          <CheckboxGroup options={EXTRA_OPTIONS} onChange={setSelectedExtras} />
+        </Dropdown>
       </div>
 
       <div className="sidebar-divider" />

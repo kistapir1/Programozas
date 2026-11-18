@@ -1,0 +1,112 @@
+Analyzed package.json:L1-49
+
+Íme az összes fontos parancs logikusan csoportosítva, amit a projekt futtatásához, teszteléséhez és Docker-beli újraépítéséhez használni tudsz.
+
+---
+
+### 1. Napi használat – A meglévő rendszer indítása és futtatása
+
+Ha az adatbázis már fel van töltve és csak el szeretnéd indítani az alkalmazást:
+
+#### A) Backend és Adatbázis indítása (Docker)
+A projekt gyökérkönyvtárában (`c:\GitHub\Programozas`):
+```powershell
+docker compose up -d
+```
+*(Ez elindítja a háttérben a `postgres-db` és a `menetrend-backend` konténert.)*
+
+#### B) Frontend indítása
+Egy külön terminálban lépj be a `frontend` mappába:
+```powershell
+cd c:\GitHub\Programozas\frontend
+```
+
+- **Ha Electron asztali alkalmazásként akarod futtatni:**
+  ```powershell
+  npm run electron:dev
+  ```
+- **Ha csak böngészőben akarod tesztelni (`http://localhost:5173`):**
+  ```powershell
+  npm run dev
+  ```
+
+#### C) Rendszer leállítása nap végén
+```powershell
+docker compose down
+```
+
+---
+
+### 2. Teljes újratelepítés – Adatbázis és Backend nulláról való újraépítése
+
+Ha törölni szeretnél mindent (üres adatbázis, új konténerek) és teljesen újraépíteni + újraimportálni a 6 millió GTFS rekordot:
+
+#### 1. lépés: Régi konténerek és perzisztens kötetek (adatok) törlése
+A projekt gyökérkönyvtárában:
+```powershell
+docker compose down -v
+```
+*(A `-v` kapcsoló letörli a `pgdata` adatbázis-kötetet is, így tiszta lappal indulsz.)*
+
+#### 2. lépés: Konténerek újraépítése és elindítása
+```powershell
+docker compose up -d --build
+```
+
+#### 3. lépés: A `schema.sql` bemásolása a backend konténerbe
+*(Erre azért van szükség, mert az import script a backend konténerben futva ebből inicializálja a táblákat):*
+```powershell
+docker cp schema.sql menetrend-backend:/app/schema.sql
+```
+
+#### 4. lépés: A GTFS adatok beimportálása (kb. 45–60 másodperc)
+```powershell
+docker exec menetrend-backend python import_gtfs.py
+```
+
+#### 5. lépés: Az `unaccent` bővítmény bekapcsolása (az ékezetmentes kereséshez)
+```powershell
+docker exec postgres-db psql -U postgres -d menetrend_db -c "CREATE EXTENSION IF NOT EXISTS unaccent;"
+```
+
+Kész! Az adatbázis és a backend ezzel teljesen újraépült és minden GTFS adat a helyére került.
+
+---
+
+### 3. Hasznos ellenőrző és tesztparancsok
+
+#### Konténerek futási állapotának ellenőrzése:
+```powershell
+docker ps
+```
+
+#### Backend logok megtekintése élőben:
+```powershell
+docker logs -f menetrend-backend
+```
+
+#### PostgreSQL adatbázis logok megtekintése:
+```powershell
+docker logs -f postgres-db
+```
+
+#### Belépés az adatbázis konzolba (`psql`):
+```powershell
+docker exec -it postgres-db psql -U postgres -d menetrend_db
+```
+*(Kilépés: `\q`)*
+
+#### Integrációs tesztek futtatása a backendben:
+```powershell
+# Menetrendkereső és átszállási tesztek (10/10 PASS)
+docker exec menetrend-backend python test_integration.py
+
+# Felhasználókezelési és bejelentkezési tesztek
+docker exec menetrend-backend python test_auth.py
+```
+
+#### Frontend TypeScript hibaellenőrzés:
+```powershell
+cd c:\GitHub\Programozas\frontend
+npx tsc --noEmit
+```

@@ -7,6 +7,7 @@ from database import get_db_connection
 from db_trip_repository import DbTripRepository
 from schedule_search_service import ScheduleSearchService
 from auth import router as auth_router
+from profile import router as profile_router
 
 app = FastAPI(title="Menetrend Kereső API", version="1.0.0")
 
@@ -21,6 +22,7 @@ app.add_middleware(
 
 # Regisztráció / belépés végpontok (/api/auth/...)
 app.include_router(auth_router)
+app.include_router(profile_router)
 
 # Keresési kérés struktúrája a frontend felől
 class SearchRequest(BaseModel):
@@ -29,6 +31,11 @@ class SearchRequest(BaseModel):
     waypoints: Optional[List[str]] = []
     transport_modes: Optional[List[str]] = []
     max_transfers: Optional[int] = 2
+    min_transfer_time: Optional[int] = 5
+    bikes_allowed: Optional[bool] = False
+    wheelchair_accessible: Optional[bool] = False
+    wheelchair_boarding: Optional[bool] = False
+    accessibility_filters: Optional[List[str]] = []
     time_mode: Optional[str] = "departure"
     date: Optional[str] = None
     time: Optional[str] = None
@@ -77,11 +84,20 @@ def search_schedule(search: SearchRequest):
         # Ha departure módban van és van megadva időpont, figyelembe vesszük
         time_filter = search.time if search.time_mode == "departure" and search.time else None
         
+        bikes = bool(search.bikes_allowed or ("bikes_allowed" in (search.accessibility_filters or [])))
+        wheelchair_acc = bool(search.wheelchair_accessible or ("wheelchair_accessible" in (search.accessibility_filters or [])))
+        wheelchair_board = bool(search.wheelchair_boarding or ("wheelchair_boarding" in (search.accessibility_filters or [])))
+
         result = service.search(
             origin=search.origin,
             destination=search.destination,
             transport_modes=list(search.transport_modes or []),
             departure_time_from=time_filter,
+            max_transfers=search.max_transfers if search.max_transfers is not None else 2,
+            min_transfer_time=search.min_transfer_time if search.min_transfer_time is not None else 5,
+            bikes_allowed=bikes,
+            wheelchair_accessible=wheelchair_acc,
+            wheelchair_boarding=wheelchair_board,
         )
         return result
     except ValueError as e:

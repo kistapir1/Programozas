@@ -8,9 +8,7 @@ import "./index.css";
 // Az API végpont base URL-je
 const API_BASE = "http://localhost:8000";
 
-// Egy menetrend-találat típusa (a backend által visszaadott mezők)
-interface ScheduleResult {
-  trip_id: number;
+interface Leg {
   route_short_name: string;
   route_long_name: string;
   transport_mode: string;
@@ -19,6 +17,27 @@ interface ScheduleResult {
   departure_time: string;
   destination_station: string;
   arrival_time: string;
+  walk_seconds_before?: number;
+  transfer_station?: string;
+  bikes_allowed?: number;
+  wheelchair_accessible?: number;
+}
+
+// Egy menetrend-találat típusa (a backend által visszaadott mezők)
+interface ScheduleResult {
+  trip_id: number | string;
+  route_short_name: string;
+  route_long_name: string;
+  transport_mode: string;
+  operator: string;
+  origin_station: string;
+  departure_time: string;
+  destination_station: string;
+  arrival_time: string;
+  transfers?: number;
+  bikes_allowed?: number;
+  wheelchair_accessible?: number;
+  legs?: Leg[];
 }
 
 interface SearchParams {
@@ -27,6 +46,10 @@ interface SearchParams {
   waypoints: string[];
   transport_modes: string[];
   max_transfers: number;
+  min_transfer_time?: number;
+  bikes_allowed?: boolean;
+  wheelchair_accessible?: boolean;
+  wheelchair_boarding?: boolean;
   time_mode: "departure" | "arrival";
   date: string;
   time: string;
@@ -125,7 +148,7 @@ function App() {
           </div>
         ): showProfile ? (
           <div className="app-shell">
-            <Profile user={currentUser} onBack={() => setShowProfile(false)} />
+            <Profile user={currentUser} accessToken={accessToken} onBack={() => setShowProfile(false)} />
           </div>
         ):(
       <div className="app-shell">
@@ -159,7 +182,7 @@ function App() {
           {!loading && searched && !error && results.length === 0 && (
             <div className="placeholder-card">
               <h2>Nincs találat</h2>
-              <p>Nem található menetrend a megadott feltételekkel. Próbáljon más útvonalat!</p>
+              <p>Nincs a kritériumoknak megfelelő találat.</p>
             </div>
           )}
 
@@ -169,27 +192,72 @@ function App() {
                 {results.length} találat
               </h2>
               {results.map((r, idx) => {
-                const mode = MODE_LABELS[r.transport_mode] ?? { label: r.transport_mode, icon: "🚏" };
+                const transfersCount = r.transfers ?? (r.legs ? r.legs.length - 1 : 0);
+                const legsToRender = r.legs && r.legs.length > 0 ? r.legs : [r];
+
                 return (
                   <div key={idx} className="result-card">
-                    <div className="result-header">
-                      <span className="result-icon">{mode.icon}</span>
-                      <span className="result-route-name">{r.route_short_name}</span>
-                      <span className="result-mode-badge">{mode.label}</span>
-                    </div>
-                    <p className="result-long-name">{r.route_long_name}</p>
-                    <div className="result-times">
-                      <div className="result-stop">
-                        <span className="time">{r.departure_time}</span>
-                        <span className="station">{r.origin_station}</span>
+                    {/* Összesített fejléc (különösen hasznos átszállás esetén) */}
+                    <div className="result-journey-summary">
+                      <div className="journey-total-time">
+                        <span className="journey-time-main">{r.departure_time} → {r.arrival_time}</span>
+                        <span className="journey-station-sub">{r.origin_station} → {r.destination_station}</span>
                       </div>
-                      <span className="result-arrow">→</span>
-                      <div className="result-stop">
-                        <span className="time">{r.arrival_time}</span>
-                        <span className="station">{r.destination_station}</span>
+                      <div className="journey-badges">
+                        {r.bikes_allowed === 1 && <span className="accessibility-badge" title="Kerékpárszállítás megengedett">🚲</span>}
+                        {r.wheelchair_accessible === 1 && <span className="accessibility-badge" title="Akadálymentes jármű">♿</span>}
+                        <span className={`result-transfer-badge ${transfersCount === 0 ? "direct" : "transfer"}`}>
+                          {transfersCount === 0 ? "Közvetlen" : `${transfersCount} átszállás`}
+                        </span>
                       </div>
                     </div>
-                    <p className="result-operator">🏢 {r.operator}</p>
+
+                    {/* Szakaszok (legs) listázása */}
+                    <div className="result-legs-list">
+                      {legsToRender.map((leg, legIdx) => {
+                        const mode = MODE_LABELS[leg.transport_mode] ?? { label: leg.transport_mode, icon: "🚏" };
+                        return (
+                          <div key={legIdx} className="result-leg-wrapper">
+                            {legIdx > 0 && (
+                              <div className="result-transfer-divider">
+                                <span className="transfer-icon">🔄</span>
+                                <span className="transfer-text">
+                                  Átszállás: <strong>{leg.transfer_station || leg.origin_station}</strong>
+                                  {leg.walk_seconds_before ? ` (~${Math.round(leg.walk_seconds_before / 60)} perc séta / csatlakozás)` : ""}
+                                </span>
+                              </div>
+                            )}
+
+                            <div className="result-leg-item">
+                              <div className="result-header">
+                                <span className="result-icon">{mode.icon}</span>
+                                <span className="result-route-name">{leg.route_short_name}</span>
+                                {leg.bikes_allowed === 1 && (
+                                  <span className="accessibility-icon" title="Kerékpárszállítás megengedett">🚲</span>
+                                )}
+                                {leg.wheelchair_accessible === 1 && (
+                                  <span className="accessibility-icon" title="Akadálymentes jármű">♿</span>
+                                )}
+                                <span className="result-mode-badge">{mode.label}</span>
+                              </div>
+                              <p className="result-long-name">{leg.route_long_name}</p>
+                              <div className="result-times">
+                                <div className="result-stop">
+                                  <span className="time">{leg.departure_time}</span>
+                                  <span className="station">{leg.origin_station}</span>
+                                </div>
+                                <span className="result-arrow">→</span>
+                                <div className="result-stop">
+                                  <span className="time">{leg.arrival_time}</span>
+                                  <span className="station">{leg.destination_station}</span>
+                                </div>
+                              </div>
+                              <p className="result-operator">🏢 {leg.operator}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 );
               })}
