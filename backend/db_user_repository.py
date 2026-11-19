@@ -31,6 +31,9 @@ class UserRepository(Protocol):
     def find_by_id(self, user_id: int) -> Optional[dict]: ...
     def create_user(self, username: str, email: str, password_hash: str) -> dict: ...
     def update_password_hash(self, user_id: int, password_hash: str) -> None: ...
+    def search_by_username(
+        self, query: str, *, exclude_user_id: Optional[int] = None, limit: int = 10
+    ) -> list[dict]: ...
 
 
 _USER_COLUMNS = "user_id, username, email, password_hash, created_at"
@@ -108,5 +111,42 @@ class DbUserRepository:
                     (password_hash, user_id),
                 )
             conn.commit()
+        finally:
+            conn.close()
+
+    def search_by_username(
+        self, query: str, *, exclude_user_id: Optional[int] = None, limit: int = 10
+    ) -> list[dict]:
+        """Részleges, kis- és nagybetűtől független találatok a felhasználónévre.
+
+        Csak user_id és username kerül vissza: email és jelszóhash nem.
+        A % és _ karakterek a keresett szöveg részei, nem minta.
+        A pontos előtag-egyezések előrébb kerülnek.
+        """
+        term = query.strip()
+        if not term or limit < 1:
+            return []
+
+        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        contains = f"%{escaped}%"
+        prefix = f"{escaped}%"
+
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT user_id, username
+                    FROM users
+                    WHERE LOWER(username) LIKE LOWER(%s) ESCAPE '\\'
+                      AND (%s::int IS NULL OR user_id <> %s)
+                    ORDER BY
+                      CASE WHEN LOWER(username) LIKE LOWER(%s) ESCAPE '\\' THEN 0 ELSE 1 END,
+                      LOWER(username)
+                    LIMIT %s
+                    """,
+                    (contains, exclude_user_id, exclude_user_id, prefix, limit),
+                )
+                return [dict(row) for row in cur.fetchall()]
         finally:
             conn.close()

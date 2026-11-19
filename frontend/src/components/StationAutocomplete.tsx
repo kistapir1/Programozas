@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useId } from "react";
 
 interface StationAutocompleteProps {
   value: string;
@@ -9,6 +9,10 @@ interface StationAutocompleteProps {
 
 const API_BASE = "http://localhost:8000";
 
+interface StationSearchHit {
+  name: string;
+}
+
 export default function StationAutocomplete({
   value,
   onChange,
@@ -16,72 +20,77 @@ export default function StationAutocomplete({
   className = "text-input",
 }: StationAutocompleteProps) {
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [searchComplete, setSearchComplete] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [isFocused, setIsFocused] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState<number>(-1);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const justSelectedRef = useRef(false);
+  const selectedStationRef = useRef<string | null>(null);
+  const resultsId = useId();
 
-  // Lekérés a backend /api/stations végpontról
   useEffect(() => {
-    // Ha épp most választottunk elemet, ne indítsunk új keresést
-    if (justSelectedRef.current) {
-      justSelectedRef.current = false;
+    if (selectedStationRef.current === value) {
+      selectedStationRef.current = null;
       return;
     }
+    selectedStationRef.current = null;
 
-    if (!value || value.trim().length < 2) {
+    const query = value.trim();
+    if (!query) {
       setSuggestions([]);
-      setIsOpen(false);
+      setIsLoading(false);
+      setSearchComplete(false);
+      setSearchError(null);
       return;
     }
 
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
+    const controller = new AbortController();
+    setSuggestions([]);
+    setIsLoading(true);
+    setSearchComplete(false);
+    setSearchError(null);
+    setSelectedIndex(-1);
 
-    debounceTimerRef.current = setTimeout(async () => {
+    const timeoutId = window.setTimeout(async () => {
       try {
-        setIsLoading(true);
         const res = await fetch(
-          `${API_BASE}/api/stations?q=${encodeURIComponent(value.trim())}`
+          `${API_BASE}/api/stations?q=${encodeURIComponent(query)}`,
+          { signal: controller.signal }
         );
-        if (!res.ok) return;
+        if (!res.ok) {
+          throw new Error(`A megállókeresés nem sikerült (HTTP ${res.status}).`);
+        }
 
-        const data = await res.json();
-        // data: [{ name: "..." }, ...]
-        const names: string[] = Array.from(
-          new Set(data.map((item: { name: string }) => item.name))
-        );
-
+        const data: StationSearchHit[] = await res.json();
+        const names = Array.from(new Set(data.map((item) => item.name)));
         setSuggestions(names);
-        setIsOpen(names.length > 0);
-        setSelectedIndex(-1);
-      } catch (err) {
-        console.error("Autocomplete fetch hiba:", err);
+        setSearchComplete(true);
+      } catch (err: unknown) {
+        if (controller.signal.aborted) return;
+        setSearchError(err instanceof Error ? err.message : "Ismeretlen hiba történt.");
       } finally {
-        setIsLoading(false);
+        if (!controller.signal.aborted) {
+          setIsLoading(false);
+        }
       }
     }, 180);
 
     return () => {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-      }
+      window.clearTimeout(timeoutId);
+      controller.abort();
     };
   }, [value]);
 
-  // Kívülre kattintás figyelése a lista bezárásához
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (
         containerRef.current &&
         !containerRef.current.contains(e.target as Node)
       ) {
-        setIsOpen(false);
+        setIsFocused(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -89,15 +98,15 @@ export default function StationAutocomplete({
   }, []);
 
   const handleSelect = (stationName: string) => {
-    justSelectedRef.current = true;
+    selectedStationRef.current = stationName;
     onChange(stationName);
-    setIsOpen(false);
+    setIsFocused(false);
     setSuggestions([]);
     inputRef.current?.blur();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (!isOpen || suggestions.length === 0) return;
+    if (!isFocused || suggestions.length === 0) return;
 
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -113,7 +122,7 @@ export default function StationAutocomplete({
       e.preventDefault();
       handleSelect(suggestions[selectedIndex]);
     } else if (e.key === "Escape") {
-      setIsOpen(false);
+      setIsFocused(false);
     }
   };
 
@@ -125,29 +134,51 @@ export default function StationAutocomplete({
         className={className}
         placeholder={placeholder}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setIsFocused(true);
+        }}
         onFocus={() => {
-          if (suggestions.length > 0) setIsOpen(true);
+          setIsFocused(true);
         }}
         onKeyDown={handleKeyDown}
         autoComplete="off"
+        aria-label={placeholder}
+        aria-expanded={isFocused && Boolean(value.trim())}
+        aria-controls={resultsId}
+        aria-autocomplete="list"
       />
 
-      {isLoading && <span className="autocomplete-spinner">…</span>}
-
-      {isOpen && suggestions.length > 0 && (
-        <ul className="autocomplete-dropdown">
-          {suggestions.map((name, index) => (
-            <li
-              key={index}
-              className={`autocomplete-item ${
-                index === selectedIndex ? "active" : ""
-              }`}
-              onMouseDown={() => handleSelect(name)}
-            >
-              <span className="station-text">{name}</span>
+      {isFocused && value.trim() && (isLoading || searchError || searchComplete) && (
+        <ul
+          id={resultsId}
+          className="autocomplete-dropdown"
+          role={suggestions.length > 0 && !isLoading && !searchError ? "listbox" : undefined}
+          aria-label={suggestions.length > 0 ? "Megálló keresési találatok" : undefined}
+        >
+          {isLoading ? (
+            <li className="autocomplete-message" role="status">Keresés…</li>
+          ) : searchError ? (
+            <li className="autocomplete-message error" role="alert">
+              {searchError}
             </li>
-          ))}
+          ) : suggestions.length > 0 ? (
+            suggestions.map((name, index) => (
+              <li
+                key={name}
+                role="option"
+                aria-selected={index === selectedIndex}
+                className={`autocomplete-item ${
+                  index === selectedIndex ? "active" : ""
+                }`}
+                onMouseDown={() => handleSelect(name)}
+              >
+                <span className="station-text">{name}</span>
+              </li>
+            ))
+          ) : (
+            <li className="autocomplete-message" role="status">Nincs találat.</li>
+          )}
         </ul>
       )}
     </div>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Sidebar from "./components/Sidebar";
 import Navbar from "./components/Navbar";
 import AuthPanel, {type AuthResponse} from "./components/AuthPanel";
@@ -55,6 +55,15 @@ interface SearchParams {
   time: string;
 }
 
+interface UserSearchHit {
+  user_id: number;
+  username: string;
+}
+
+interface UserSearchResponse {
+  results: UserSearchHit[];
+}
+
 // Transport mode → Magyar szöveg + ikon (közvetlenül az adatbázisbeli route_types.type_name szerint)
 const MODE_LABELS: Record<string, { label: string; icon: string }> = {
   "Metró":                 { label: "Metró",     icon: "🚇" },
@@ -66,6 +75,10 @@ const MODE_LABELS: Record<string, { label: string; icon: string }> = {
   "Vasút":                 { label: "Vasút",     icon: "🚆" },
 };
 
+function formatDisplayTime(time: string): string {
+  const match = /^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/.exec(time);
+  return match ? `${match[1].padStart(2, "0")}:${match[2]}` : time;
+}
 
 function App() {
   const [results, setResults] = useState<ScheduleResult[]>([]);
@@ -78,6 +91,62 @@ function App() {
     () => localStorage.getItem("access_token")
   );
   const [currentUser, setCurrentUser] = useState<AuthResponse["user"] | null>(null);
+  const [userSearchQuery, setUserSearchQuery] = useState("");
+  const [userSearchResults, setUserSearchResults] = useState<UserSearchHit[]>([]);
+  const [userSearchLoading, setUserSearchLoading] = useState(false);
+  const [userSearchComplete, setUserSearchComplete] = useState(false);
+  const [userSearchError, setUserSearchError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const query = userSearchQuery.trim();
+    if (!accessToken || !query) {
+      setUserSearchResults([]);
+      setUserSearchLoading(false);
+      setUserSearchComplete(false);
+      setUserSearchError(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    setUserSearchResults([]);
+    setUserSearchLoading(true);
+    setUserSearchComplete(false);
+    setUserSearchError(null);
+
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const searchParams = new URLSearchParams({ q: query });
+        const response = await fetch(`${API_BASE}/api/users/search?${searchParams}`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(
+            response.status === 401
+              ? "A munkamenet lejárt. Kérjük, jelentkezzen be újra."
+              : `A felhasználókeresés nem sikerült (HTTP ${response.status}).`
+          );
+        }
+
+        const data: UserSearchResponse = await response.json();
+        setUserSearchResults(data.results);
+        setUserSearchComplete(true);
+      } catch (e: unknown) {
+        if (controller.signal.aborted) return;
+        setUserSearchError(e instanceof Error ? e.message : "Ismeretlen hiba történt.");
+      } finally {
+        if (!controller.signal.aborted) {
+          setUserSearchLoading(false);
+        }
+      }
+    }, 300);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [accessToken, userSearchQuery]);
 
   const handleLoginSuccess = (auth: AuthResponse) => {
     localStorage.setItem("access_token", auth.access_token);
@@ -93,6 +162,7 @@ function App() {
     localStorage.removeItem("access_token");
     setAccessToken(null);
     setCurrentUser(null);
+    setUserSearchQuery("");
     setShowProfile(false);
   };
 
@@ -136,7 +206,12 @@ function App() {
         onLogout={handleLogout}
         onProfileClick={() => setShowProfile(true)}
         onSavedRoutesClick={() => console.log("Mentett útvonalak – TODO")}
-        onUserSearch={(query) => console.log("Felhasználó keresése:", query)}
+        userSearchQuery={userSearchQuery}
+        userSearchResults={userSearchResults}
+        userSearchLoading={userSearchLoading}
+        userSearchComplete={userSearchComplete}
+        userSearchError={userSearchError}
+        onUserSearch={setUserSearchQuery}
       />
         {showAuth ? (
           <div className="app-shell">
@@ -194,13 +269,15 @@ function App() {
               {results.map((r, idx) => {
                 const transfersCount = r.transfers ?? (r.legs ? r.legs.length - 1 : 0);
                 const legsToRender = r.legs && r.legs.length > 0 ? r.legs : [r];
+                const departureTime = formatDisplayTime(r.departure_time);
+                const arrivalTime = formatDisplayTime(r.arrival_time);
 
                 return (
                   <div key={idx} className="result-card">
                     {/* Összesített fejléc (különösen hasznos átszállás esetén) */}
                     <div className="result-journey-summary">
                       <div className="journey-total-time">
-                        <span className="journey-time-main">{r.departure_time} → {r.arrival_time}</span>
+                        <span className="journey-time-main">{departureTime} → {arrivalTime}</span>
                         <span className="journey-station-sub">{r.origin_station} → {r.destination_station}</span>
                       </div>
                       <div className="journey-badges">
@@ -216,6 +293,8 @@ function App() {
                     <div className="result-legs-list">
                       {legsToRender.map((leg, legIdx) => {
                         const mode = MODE_LABELS[leg.transport_mode] ?? { label: leg.transport_mode, icon: "🚏" };
+                        const legDepartureTime = formatDisplayTime(leg.departure_time);
+                        const legArrivalTime = formatDisplayTime(leg.arrival_time);
                         return (
                           <div key={legIdx} className="result-leg-wrapper">
                             {legIdx > 0 && (
@@ -243,12 +322,12 @@ function App() {
                               <p className="result-long-name">{leg.route_long_name}</p>
                               <div className="result-times">
                                 <div className="result-stop">
-                                  <span className="time">{leg.departure_time}</span>
+                                  <span className="time">{legDepartureTime}</span>
                                   <span className="station">{leg.origin_station}</span>
                                 </div>
                                 <span className="result-arrow">→</span>
                                 <div className="result-stop">
-                                  <span className="time">{leg.arrival_time}</span>
+                                  <span className="time">{legArrivalTime}</span>
                                   <span className="station">{leg.destination_station}</span>
                                 </div>
                               </div>

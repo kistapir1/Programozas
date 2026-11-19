@@ -71,6 +71,19 @@ class StubUserRepository:
     def update_password_hash(self, user_id, password_hash):
         self.users[user_id]["password_hash"] = password_hash
 
+    def search_by_username(self, query, *, exclude_user_id=None, limit=10):
+        term = query.strip().lower()
+        if not term or limit < 1:
+            return []
+        hits = [
+            {"user_id": u["user_id"], "username": u["username"]}
+            for u in self.users.values()
+            if u["user_id"] != exclude_user_id and term in u["username"].lower()
+        ]
+        # Előtag-egyezés előrébb, utána abc-sorrend (ugyanaz a sorrend, mint az SQL-ben)
+        hits.sort(key=lambda u: (not u["username"].lower().startswith(term), u["username"].lower()))
+        return hits[:limit]
+
 
 @pytest.fixture
 def repo():
@@ -263,3 +276,51 @@ def test_me_torolt_felhasznalo_tokenje(client, repo):
     token = register(client).json()["access_token"]
     repo.users.clear()
     assert client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"}).status_code == 401
+
+
+# =============================================================================
+# FELHASZNÁLÓKERESÉS
+# =============================================================================
+
+def _auth(token: str) -> dict:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_felhasznalo_kereses_token_nelkul(client):
+    assert client.get("/api/users/search", params={"q": "anna"}).status_code == 401
+
+
+def test_felhasznalo_kereses_reszleges_es_kisbetutol_fuggetlen(client, repo):
+    token = register(client, username="kereso", email="kereso@example.com").json()["access_token"]
+    repo.create_user("Anna", "anna@example.com", "hash")
+    repo.create_user("annabella", "bella@example.com", "hash")
+    repo.create_user("Bela", "bela@example.com", "hash")
+
+    r = client.get("/api/users/search", params={"q": "ANN"}, headers=_auth(token))
+    assert r.status_code == 200
+    nevek = [hit["username"] for hit in r.json()["results"]]
+    # Előtag (Anna) a tartalmazás (annabella) elé kerül
+    assert nevek == ["Anna", "annabella"]
+    assert "email" not in r.json()["results"][0]
+    assert "password_hash" not in r.json()["results"][0]
+
+
+def test_felhasznalo_kereses_nem_adja_vissza_onmagat(client):
+    token = register(client, username="kereso", email="kereso@example.com").json()["access_token"]
+    r = client.get("/api/users/search", params={"q": "ker"}, headers=_auth(token))
+    assert r.status_code == 200
+    assert r.json()["results"] == []
+
+
+def test_felhasznalo_kereses_szazalek_literalis(client, repo):
+    token = register(client, username="kereso", email="kereso@example.com").json()["access_token"]
+    repo.create_user("a_b", "ab@example.com", "hash")
+    repo.create_user("axb", "axb@example.com", "hash")
+    r = client.get("/api/users/search", params={"q": "a_b"}, headers=_auth(token))
+    assert [hit["username"] for hit in r.json()["results"]] == ["a_b"]
+
+
+def test_felhasznalo_kereses_ures_vagy_hianyzo_query(client):
+    token = register(client).json()["access_token"]
+    assert client.get("/api/users/search", headers=_auth(token)).status_code == 422
+    assert client.get("/api/users/search", params={"q": ""}, headers=_auth(token)).status_code == 422
