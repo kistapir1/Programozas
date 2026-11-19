@@ -846,6 +846,16 @@ body {
   font-weight: 600;
 }
 
+.autocomplete-message {
+  padding: 0.6rem 0.9rem;
+  color: #475569;
+  font-size: 0.9rem;
+}
+
+.autocomplete-message.error {
+  color: #b91c1c;
+}
+
 .station-icon {
   font-size: 0.95rem;
   flex-shrink: 0;

@@ -75,6 +75,10 @@ const MODE_LABELS: Record<string, { label: string; icon: string }> = {
   "Vasút":                 { label: "Vasút",     icon: "🚆" },
 };
 
+function formatDisplayTime(time: string): string {
+  const match = /^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/.exec(time);
+  return match ? `${match[1].padStart(2, "0")}:${match[2]}` : time;
+}
 
 function App() {
   const [results, setResults] = useState<ScheduleResult[]>([]);
@@ -265,13 +269,15 @@ function App() {
               {results.map((r, idx) => {
                 const transfersCount = r.transfers ?? (r.legs ? r.legs.length - 1 : 0);
                 const legsToRender = r.legs && r.legs.length > 0 ? r.legs : [r];
+                const departureTime = formatDisplayTime(r.departure_time);
+                const arrivalTime = formatDisplayTime(r.arrival_time);
 
                 return (
                   <div key={idx} className="result-card">
                     {/* Összesített fejléc (különösen hasznos átszállás esetén) */}
                     <div className="result-journey-summary">
                       <div className="journey-total-time">
-                        <span className="journey-time-main">{r.departure_time} → {r.arrival_time}</span>
+                        <span className="journey-time-main">{departureTime} → {arrivalTime}</span>
                         <span className="journey-station-sub">{r.origin_station} → {r.destination_station}</span>
                       </div>
                       <div className="journey-badges">
@@ -287,6 +293,8 @@ function App() {
                     <div className="result-legs-list">
                       {legsToRender.map((leg, legIdx) => {
                         const mode = MODE_LABELS[leg.transport_mode] ?? { label: leg.transport_mode, icon: "🚏" };
+                        const legDepartureTime = formatDisplayTime(leg.departure_time);
+                        const legArrivalTime = formatDisplayTime(leg.arrival_time);
                         return (
                           <div key={legIdx} className="result-leg-wrapper">
                             {legIdx > 0 && (
@@ -314,12 +322,12 @@ function App() {
                               <p className="result-long-name">{leg.route_long_name}</p>
                               <div className="result-times">
                                 <div className="result-stop">
-                                  <span className="time">{leg.departure_time}</span>
+                                  <span className="time">{legDepartureTime}</span>
                                   <span className="station">{leg.origin_station}</span>
                                 </div>
                                 <span className="result-arrow">→</span>
                                 <div className="result-stop">
-                                  <span className="time">{leg.arrival_time}</span>
+                                  <span className="time">{legArrivalTime}</span>
                                   <span className="station">{leg.destination_station}</span>
                                 </div>
                               </div>
