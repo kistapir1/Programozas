@@ -8,6 +8,7 @@ from db_trip_repository import DbTripRepository
 from schedule_search_service import ScheduleSearchService
 from auth import router as auth_router
 from profile import router as profile_router
+from users import router as users_router
 
 app = FastAPI(title="Menetrend Kereső API", version="1.0.0")
 
@@ -23,6 +24,7 @@ app.add_middleware(
 # Regisztráció / belépés végpontok (/api/auth/...)
 app.include_router(auth_router)
 app.include_router(profile_router)
+app.include_router(users_router)
 
 # Keresési kérés struktúrája a frontend felől
 class SearchRequest(BaseModel):

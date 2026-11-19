@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Sidebar from "./components/Sidebar";
 import Navbar from "./components/Navbar";
 import AuthPanel, {type AuthResponse} from "./components/AuthPanel";
@@ -55,6 +55,15 @@ interface SearchParams {
   time: string;
 }
 
+interface UserSearchHit {
+  user_id: number;
+  username: string;
+}
+
+interface UserSearchResponse {
+  results: UserSearchHit[];
+}
+
 // Transport mode → Magyar szöveg + ikon (közvetlenül az adatbázisbeli route_types.type_name szerint)
 const MODE_LABELS: Record<string, { label: string; icon: string }> = {
   "Metró":                 { label: "Metró",     icon: "🚇" },
@@ -78,6 +87,62 @@ function App() {
     () => localStorage.getItem("access_token")
   );
   const [currentUser, setCurrentUser] = useState<AuthResponse["user"] | null>(null);
+  const [userSearchQuery, setUserSearchQuery] = useState("");
+  const [userSearchResults, setUserSearchResults] = useState<UserSearchHit[]>([]);
+  const [userSearchLoading, setUserSearchLoading] = useState(false);
+  const [userSearchComplete, setUserSearchComplete] = useState(false);
+  const [userSearchError, setUserSearchError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const query = userSearchQuery.trim();
+    if (!accessToken || !query) {
+      setUserSearchResults([]);
+      setUserSearchLoading(false);
+      setUserSearchComplete(false);
+      setUserSearchError(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    setUserSearchResults([]);
+    setUserSearchLoading(true);
+    setUserSearchComplete(false);
+    setUserSearchError(null);
+
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const searchParams = new URLSearchParams({ q: query });
+        const response = await fetch(`${API_BASE}/api/users/search?${searchParams}`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(
+            response.status === 401
+              ? "A munkamenet lejárt. Kérjük, jelentkezzen be újra."
+              : `A felhasználókeresés nem sikerült (HTTP ${response.status}).`
+          );
+        }
+
+        const data: UserSearchResponse = await response.json();
+        setUserSearchResults(data.results);
+        setUserSearchComplete(true);
+      } catch (e: unknown) {
+        if (controller.signal.aborted) return;
+        setUserSearchError(e instanceof Error ? e.message : "Ismeretlen hiba történt.");
+      } finally {
+        if (!controller.signal.aborted) {
+          setUserSearchLoading(false);
+        }
+      }
+    }, 300);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [accessToken, userSearchQuery]);
 
   const handleLoginSuccess = (auth: AuthResponse) => {
     localStorage.setItem("access_token", auth.access_token);
@@ -93,6 +158,7 @@ function App() {
     localStorage.removeItem("access_token");
     setAccessToken(null);
     setCurrentUser(null);
+    setUserSearchQuery("");
     setShowProfile(false);
   };
 
@@ -136,7 +202,12 @@ function App() {
         onLogout={handleLogout}
         onProfileClick={() => setShowProfile(true)}
         onSavedRoutesClick={() => console.log("Mentett útvonalak – TODO")}
-        onUserSearch={(query) => console.log("Felhasználó keresése:", query)}
+        userSearchQuery={userSearchQuery}
+        userSearchResults={userSearchResults}
+        userSearchLoading={userSearchLoading}
+        userSearchComplete={userSearchComplete}
+        userSearchError={userSearchError}
+        onUserSearch={setUserSearchQuery}
       />
         {showAuth ? (
           <div className="app-shell">
