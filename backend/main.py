@@ -7,6 +7,7 @@ from database import get_db_connection
 from db_trip_repository import DbTripRepository
 from schedule_search_service import ScheduleSearchService
 from auth import router as auth_router
+from friends import router as friends_router
 from profile import router as profile_router
 from users import router as users_router
 
@@ -23,6 +24,7 @@ app.add_middleware(
 
 # Regisztráció / belépés végpontok (/api/auth/...)
 app.include_router(auth_router)
+app.include_router(friends_router)
 app.include_router(profile_router)
 app.include_router(users_router)
 

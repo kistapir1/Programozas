@@ -96,6 +96,8 @@ function App() {
   const [userSearchLoading, setUserSearchLoading] = useState(false);
   const [userSearchComplete, setUserSearchComplete] = useState(false);
   const [userSearchError, setUserSearchError] = useState<string | null>(null);
+  const [friendRequestStates, setFriendRequestStates] = useState<Record<number, "sending" | "sent">>({});
+  const [friendRequestError, setFriendRequestError] = useState<string | null>(null);
 
   useEffect(() => {
     const query = userSearchQuery.trim();
@@ -152,6 +154,8 @@ function App() {
     localStorage.setItem("access_token", auth.access_token);
     setAccessToken(auth.access_token);
     setCurrentUser(auth.user);
+    setFriendRequestStates({});
+    setFriendRequestError(null);
     setShowAuth(false);
   };
 
@@ -163,7 +167,38 @@ function App() {
     setAccessToken(null);
     setCurrentUser(null);
     setUserSearchQuery("");
+    setFriendRequestStates({});
+    setFriendRequestError(null);
     setShowProfile(false);
+  };
+
+  const handleSendFriendRequest = async (target: UserSearchHit) => {
+    if (!accessToken) return;
+    setFriendRequestStates((states) => ({ ...states, [target.user_id]: "sending" }));
+    setFriendRequestError(null);
+
+    try {
+      const response = await fetch(`${API_BASE}/api/friends/requests/${target.user_id}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(
+          typeof data?.detail === "string"
+            ? data.detail
+            : `A barátkérelem küldése nem sikerült (HTTP ${response.status}).`
+        );
+      }
+      setFriendRequestStates((states) => ({ ...states, [target.user_id]: "sent" }));
+    } catch (e: unknown) {
+      setFriendRequestStates((states) => {
+        const nextStates = { ...states };
+        delete nextStates[target.user_id];
+        return nextStates;
+      });
+      setFriendRequestError(e instanceof Error ? e.message : "Ismeretlen hiba történt.");
+    }
   };
 
   const handleSearch = async (params: SearchParams) => {
@@ -211,6 +246,9 @@ function App() {
         userSearchLoading={userSearchLoading}
         userSearchComplete={userSearchComplete}
         userSearchError={userSearchError}
+        friendRequestStates={friendRequestStates}
+        friendRequestError={friendRequestError}
+        onSendFriendRequest={handleSendFriendRequest}
         onUserSearch={setUserSearchQuery}
       />
         {showAuth ? (

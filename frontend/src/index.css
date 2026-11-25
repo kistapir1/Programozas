@@ -953,6 +953,10 @@ body {
 }
 
 .nav-search-dropdown li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
   border-radius: 6px;
 }
 
@@ -962,6 +966,22 @@ body {
 
 .nav-search-dropdown li:hover {
   background: rgba(255, 255, 255, 0.08);
+}
+
+.nav-friend-request-btn {
+  flex-shrink: 0;
+  padding: 0.35rem 0.55rem;
+  border: 0;
+  border-radius: 6px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.nav-friend-request-btn:disabled {
+  background: #475569;
+  cursor: default;
 }
 
 .nav-search-error {

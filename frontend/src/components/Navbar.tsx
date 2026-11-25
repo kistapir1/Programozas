@@ -17,6 +17,9 @@ interface NavbarProps {
   userSearchLoading?: boolean;
   userSearchComplete?: boolean;
   userSearchError?: string | null;
+  friendRequestStates?: Record<number, "sending" | "sent">;
+  friendRequestError?: string | null;
+  onSendFriendRequest?: (user: UserSearchHit) => void;
 }
 
 function Navbar({ 
@@ -31,6 +34,9 @@ function Navbar({
   userSearchLoading = false,
   userSearchComplete = false,
   userSearchError = null,
+  friendRequestStates = {},
+  friendRequestError = null,
+  onSendFriendRequest,
 }: NavbarProps) {
   const [searchFocused, setSearchFocused] = useState(false);
   const showSearchDropdown =
@@ -68,11 +74,33 @@ function Navbar({
                     {userSearchError}
                   </p>
                 ) : userSearchResults.length > 0 ? (
-                  <ul aria-label="Felhasználó keresési találatok">
-                    {userSearchResults.map((user) => (
-                      <li key={user.user_id}>{user.username}</li>
-                    ))}
-                  </ul>
+                  <>
+                    <ul aria-label="Felhasználó keresési találatok">
+                      {userSearchResults.map((user) => (
+                        <li key={user.user_id}>
+                          <span>{user.username}</span>
+                          <button
+                            type="button"
+                            className="nav-friend-request-btn"
+                            disabled={friendRequestStates[user.user_id] !== undefined}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => onSendFriendRequest?.(user)}
+                          >
+                            {friendRequestStates[user.user_id] === "sending"
+                              ? "Küldés…"
+                              : friendRequestStates[user.user_id] === "sent"
+                                ? "Elküldve"
+                                : "Barátkérelem"}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                    {friendRequestError && (
+                      <p className="nav-search-message nav-search-error" role="alert">
+                        {friendRequestError}
+                      </p>
+                    )}
+                  </>
                 ) : (
                   <p className="nav-search-message" role="status">Nincs találat.</p>
                 )}
