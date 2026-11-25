@@ -15,6 +15,9 @@
     "electron:preview": "npm run electron:build-main && cross-env NODE_ENV=production electron ."
   },
   "dependencies": {
+    "@rolldown/binding-win32-x64-msvc": "^1.3.3",
+    "@types/leaflet": "^1.9.23",
+    "leaflet": "^1.9.4",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

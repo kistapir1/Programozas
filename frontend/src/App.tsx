@@ -3,6 +3,7 @@ import Sidebar from "./components/Sidebar";
 import Navbar from "./components/Navbar";
 import AuthPanel, {type AuthResponse} from "./components/AuthPanel";
 import Profile from "./components/Profile";
+import RouteMapModal from "./components/RouteMapModal";
 import "./index.css";
 
 // Az API végpont base URL-je
@@ -14,13 +15,18 @@ interface Leg {
   transport_mode: string;
   operator: string;
   origin_station: string;
+  origin_lat?: number | null;
+  origin_lon?: number | null;
   departure_time: string;
   destination_station: string;
+  destination_lat?: number | null;
+  destination_lon?: number | null;
   arrival_time: string;
   walk_seconds_before?: number;
   transfer_station?: string;
   bikes_allowed?: number;
   wheelchair_accessible?: number;
+  shape_points?: [number, number][];
 }
 
 // Egy menetrend-találat típusa (a backend által visszaadott mezők)
@@ -31,12 +37,19 @@ interface ScheduleResult {
   transport_mode: string;
   operator: string;
   origin_station: string;
+  origin_lat?: number | null;
+  origin_lon?: number | null;
   departure_time: string;
   destination_station: string;
+  destination_lat?: number | null;
+  destination_lon?: number | null;
   arrival_time: string;
   transfers?: number;
+  walk_seconds_before?: number;
+  transfer_station?: string;
   bikes_allowed?: number;
   wheelchair_accessible?: number;
+  shape_points?: [number, number][];
   legs?: Leg[];
 }
 
@@ -87,6 +100,7 @@ function App() {
   const [searched, setSearched] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [mapRoute, setMapRoute] = useState<ScheduleResult | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(
     () => localStorage.getItem("access_token")
   );
@@ -325,6 +339,13 @@ function App() {
                           {transfersCount === 0 ? "Közvetlen" : `${transfersCount} átszállás`}
                         </span>
                       </div>
+                      <button
+                        type="button"
+                        className="open-map-btn"
+                        onClick={() => setMapRoute(r)}
+                      >
+                        🗺️ Térkép megnyitása
+                      </button>
                     </div>
 
                     {/* Szakaszok (legs) listázása */}
@@ -383,6 +404,7 @@ function App() {
         </main>
       </div>
       )}
+      <RouteMapModal route={mapRoute} onClose={() => setMapRoute(null)} />
     </>
   );
 }

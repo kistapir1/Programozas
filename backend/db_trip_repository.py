@@ -56,6 +56,26 @@ def get_route_weight(short_name: str, type_name: str) -> float:
 
 class DbTripRepository:
     """Valódi GTFS adatbázis implementáció a TripRepository protokollhoz."""
+    
+    def _get_shape_points_for_trip(self, cur, trip_id: str | int | None) -> list[list[float]]:
+        """Lekéri a trip_id-hoz tartozó shape pontokat a shapes táblából."""
+        if not trip_id:
+            return []
+        cur.execute(
+            """
+            SELECT sh.shape_pt_lat, sh.shape_pt_lon
+            FROM trips t
+            JOIN shapes sh ON t.shape_id = sh.shape_id
+            WHERE t.trip_id = %s AND t.shape_id IS NOT NULL
+            ORDER BY sh.shape_pt_sequence ASC
+            """,
+            (str(trip_id),),
+        )
+        return [
+            [float(r["shape_pt_lat"]), float(r["shape_pt_lon"])]
+            for r in cur.fetchall()
+            if r["shape_pt_lat"] is not None and r["shape_pt_lon"] is not None
+        ]
 
     def find_trips(
         self,
@@ -85,7 +105,11 @@ class DbTripRepository:
                 MIN(ST2.arrival_time::text) AS arrival_time,
                 COALESCE(MAX(T.bikes_allowed), 0) AS bikes_allowed,
                 COALESCE(MAX(T.wheelchair_accessible), 0) AS wheelchair_accessible,
-                COALESCE(MAX(S1.wheelchair_boarding), 0) AS wheelchair_boarding
+                COALESCE(MAX(S1.wheelchair_boarding), 0) AS wheelchair_boarding,
+                MIN(S1.stop_lat) AS origin_lat,
+                MIN(S1.stop_lon) AS origin_lon,
+                MIN(S2.stop_lat) AS destination_lat,
+                MIN(S2.stop_lon) AS destination_lon
             FROM stops S1
             JOIN stop_times ST1 ON S1.stop_id = ST1.stop_id
             JOIN stop_times ST2 ON ST1.trip_id = ST2.trip_id
@@ -158,7 +182,11 @@ class DbTripRepository:
                     MIN(ST2.arrival_time::text) AS arrival_time,
                     COALESCE(MAX(T.bikes_allowed), 0) AS bikes_allowed,
                     COALESCE(MAX(T.wheelchair_accessible), 0) AS wheelchair_accessible,
-                    COALESCE(MAX(S1.wheelchair_boarding), 0) AS wheelchair_boarding
+                    COALESCE(MAX(S1.wheelchair_boarding), 0) AS wheelchair_boarding,
+                    MIN(S1.stop_lat) AS origin_lat,
+                    MIN(S1.stop_lon) AS origin_lon,
+                    MIN(S2.stop_lat) AS destination_lat,
+                    MIN(S2.stop_lon) AS destination_lon
                 FROM stops S1
                 JOIN stop_times ST1 ON S1.stop_id = ST1.stop_id
                 JOIN stop_times ST2 ON ST1.trip_id = ST2.trip_id
@@ -197,11 +225,21 @@ class DbTripRepository:
             """
             cur.execute(fallback_query, fallback_params)
             rows = cur.fetchall()
+            
+        results: list[dict] = []
+        for row in rows:
+            item = dict(row)
+            item["origin_lat"] = float(item["origin_lat"]) if item.get("origin_lat") is not None else None
+            item["origin_lon"] = float(item["origin_lon"]) if item.get("origin_lon") is not None else None
+            item["destination_lat"] = float(item["destination_lat"]) if item.get("destination_lat") is not None else None
+            item["destination_lon"] = float(item["destination_lon"]) if item.get("destination_lon") is not None else None
+            item["shape_points"] = self._get_shape_points_for_trip(cur, item.get("trip_id"))
+            results.append(item)
 
         cur.close()
         conn.close()
 
-        return [dict(row) for row in rows]
+        return results
 
     def find_transfer_hubs(
         self,
@@ -488,33 +526,43 @@ class DbTripRepository:
                         "bikes_allowed": journey_bikes,
                         "wheelchair_accessible": journey_wheelchair,
                         "legs": [
-                            {
-                                "route_short_name": leg1["route_short_name"],
-                                "route_long_name": leg1["route_long_name"],
-                                "transport_mode": leg1["transport_mode"],
-                                "operator": leg1["operator"],
-                                "origin_station": leg1["origin_station"],
-                                "departure_time": leg1["departure_time"],
-                                "destination_station": leg1["destination_station"],
-                                "arrival_time": leg1["arrival_time"],
-                                "bikes_allowed": leg1.get("bikes_allowed", 0),
-                                "wheelchair_accessible": leg1.get("wheelchair_accessible", 0),
-                            },
-                            {
-                                "route_short_name": leg2["route_short_name"],
-                                "route_long_name": leg2["route_long_name"],
-                                "transport_mode": leg2["transport_mode"],
-                                "operator": leg2["operator"],
-                                "origin_station": leg2["origin_station"],
-                                "departure_time": leg2["departure_time"],
-                                "destination_station": leg2["destination_station"],
-                                "arrival_time": leg2["arrival_time"],
-                                "walk_seconds_before": effective_transfer_sec,
-                                "transfer_station": leg1["destination_station"],
-                                "bikes_allowed": leg2.get("bikes_allowed", 0),
-                                "wheelchair_accessible": leg2.get("wheelchair_accessible", 0),
-                            },
-                        ],
+                        {
+                            "route_short_name": leg1["route_short_name"],
+                            "route_long_name": leg1["route_long_name"],
+                            "transport_mode": leg1["transport_mode"],
+                            "operator": leg1["operator"],
+                            "origin_station": leg1["origin_station"],
+                            "origin_lat": leg1["origin_lat"],
+                            "origin_lon": leg1["origin_lon"],
+                            "departure_time": leg1["departure_time"],
+                            "destination_station": leg1["destination_station"],
+                            "destination_lat": leg1["destination_lat"],
+                            "destination_lon": leg1["destination_lon"],
+                            "arrival_time": leg1["arrival_time"],
+                            "bikes_allowed": leg1.get("bikes_allowed", 0),
+                            "wheelchair_accessible": leg1.get("wheelchair_accessible", 0),
+                            "shape_points": leg1.get("shape_points", []),
+                        },
+                        {
+                            "route_short_name": leg2["route_short_name"],
+                            "route_long_name": leg2["route_long_name"],
+                            "transport_mode": leg2["transport_mode"],
+                            "operator": leg2["operator"],
+                            "origin_station": leg2["origin_station"],
+                            "origin_lat": leg2.get("origin_lat"),
+                            "origin_lon": leg2.get("origin_lon"),
+                            "departure_time": leg2["departure_time"],
+                            "destination_station": leg2["destination_station"],
+                            "destination_lat": leg2["destination_lat"],
+                            "destination_lon": leg2["destination_lon"],
+                            "arrival_time": leg2["arrival_time"],
+                            "walk_seconds_before": effective_transfer_sec,
+                            "transfer_station": leg1["destination_station"],
+                            "bikes_allowed": leg2.get("bikes_allowed", 0),
+                            "wheelchair_accessible": leg2.get("wheelchair_accessible", 0),
+                            "shape_points": leg2.get("shape_points", []),
+                        },
+                    ],
                     }
                     found_journeys.append(journey)
 
